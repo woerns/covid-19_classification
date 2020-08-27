@@ -16,9 +16,18 @@ def load_model(model_name):
         # Replace last layer
         num_ftrs = model.fc.in_features
         model.fc = torch.nn.Linear(num_ftrs, 1)
-    elif model_name == 'resnet18_bs10':
-        # ResNet
+    elif model_name == 'resnet18_bs10_full':
+        # ResNet Full
         model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet18', pretrained=True)
+        # Replace last layer
+        num_ftrs = model.fc.in_features
+        #         model.fc = BootstrapLinear(num_ftrs, 10)
+        model.fc = torch.nn.Linear(num_ftrs, 10)
+    elif model_name == 'resnet18_bs10_last':
+        # ResNet with only last layer trainable
+        model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet18', pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
         # Replace last layer
         num_ftrs = model.fc.in_features
         model.fc = BootstrapLinear(num_ftrs, 10)
@@ -29,7 +38,7 @@ def load_model(model_name):
         num_ftrs = model.fc.in_features
         model.fc = BootstrapLinear(num_ftrs, 50)
     else:
-        raise ("Unknown model name.")
+        raise ValueError("Unknown model name.")
 
     return model
 
@@ -70,7 +79,7 @@ def load_transform(transform_name):
                                  std=[0.229, 0.224, 0.225])
         ])
     else:
-        raise ("Unknown transform.")
+        raise ValueError("Unknown transform.")
 
     return data_transform
 
@@ -81,6 +90,6 @@ def load_criterion(criterion_name):
     elif criterion_name == 'binary_crossentropy':
         criterion = torch.nn.BCEWithLogitsLoss()
     else:
-        raise ("Unknown transform.")
+        raise ValueError("Unknown criterion.")
 
     return criterion
