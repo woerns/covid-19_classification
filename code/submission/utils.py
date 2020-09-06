@@ -12,21 +12,22 @@ from torchvision import datasets, transforms
 from skimage.feature import canny
 from PIL import Image
 
+
 class CTImageDataSet(torch.utils.data.Dataset):
     """CT Image dataset."""
 
-    def __init__(self, X_train, y_train, transform=None, add_mask=False):
+    def __init__(self, X, y, transform=None, add_mask=False):
 
         if add_mask:
             self.x = [np.concatenate([x, np.expand_dims(canny(x.mean(axis=-1) / 255.) * 255, axis=2).astype(np.uint8)],
-                            axis=2) for x in X_train]
+                            axis=2) for x in X]
         else:
-            self.x = X_train
+            self.x = X
         # Convert numpy array to PILImage
-        self.x = list(map(Image.fromarray, self.x))
+        self.x = list(map(lambda x: Image.fromarray(x).convert(mode='RGB'), self.x))    # Convert to RGB
 
-        self.y = y_train
-        self.n_samples = len(X_train)
+        self.y = y
+        self.n_samples = len(X)
         self.transform = transform
 
 
@@ -53,7 +54,7 @@ def load_img_data(data_dir):
     y = []
     for img, target in dataset:
         X.append(np.array(img))
-        y.append(target)
+        y.append(dataset.classes[target].split('_')[-1])    # Assuming folder label has prefix "CT_"
 
     return X, y
 
@@ -94,7 +95,8 @@ def load_data_transform(train=False, add_mask=False):
 def create_bs_resnet(output_dim=10, add_mask=False):
     # ResNet Full
     # model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet18', pretrained=True)
-    model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
+    # model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
+    model = torch.hub.load('pytorch/vision:v0.6.0', 'resnext50_32x4d', pretrained=True)
 
     if add_mask:
         with torch.no_grad():
@@ -135,14 +137,14 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     return bs_train_loader
 
 
-def train(model, bs_train_loader, n_epochs=10, val_loader=None):
+def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None):
     model.train()
 
     n_bootstrap = len(bs_train_loader)
     steps_per_epoch = len(bs_train_loader[0])
     criterion = torch.nn.BCEWithLogitsLoss()
     # optimizer = torch.optim.SGD(model.parameters(), lr=0.002, momentum=0.9, weight_decay=0.0001)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     writer = SummaryWriter("./runs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M"))
