@@ -214,7 +214,7 @@ def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None, devic
                         for data in val_loader:
                             images, labels = data
                             # push tensors to set device (CPU or GPU)
-                            inputs, labels = inputs.to(device), labels.to(device)
+                            images, labels = images.to(device), labels.to(device)
 
                             outputs = model(images)
                             # need to average multiple predictions of bootstrap net
