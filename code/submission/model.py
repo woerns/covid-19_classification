@@ -11,7 +11,7 @@ def estimate(X_train, y_train):
     N_EPOCHS = 30
     LEARNING_RATE = 0.0001
     MODEL_NAME = 'resnet50'
-    LABEL_MAP = {'COVID': 0, 'NonCOVID': 1}
+    LABEL_MAP = {'COVID': 1, 'NonCOVID': 0}
     DEVICE = 'cuda'
 
     # Create model
@@ -63,8 +63,8 @@ def predict(X_test, model):
             mean_output = outputs.data.mean(dim=-1)
             predicted = (mean_output > 0).int()
             if predicted == 1:
-                y_pred.append('NonCOVID')
-            else:
                 y_pred.append('COVID')
+            else:
+                y_pred.append('NonCOVID')
 
     return y_pred
