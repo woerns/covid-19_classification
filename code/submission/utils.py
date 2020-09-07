@@ -156,7 +156,8 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-    writer = SummaryWriter("./runs/" + model_name + "_" + datetime.datetime.now().strftime("%Y%m%d-%H%M"))
+    run_name = model_name + "_" + datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    writer = SummaryWriter("./runs/" + run_name)
 
     iterators = [iter(x) for x in bs_train_loader]
 
@@ -246,3 +247,5 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
 
         scheduler.step()
 
+        # Save model
+        torch.save(model, run_name + '.pth')
