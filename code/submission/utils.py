@@ -247,5 +247,5 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
 
         scheduler.step()
 
-        # Save model
-        torch.save(model, run_name + '.pth')
+    # Save model
+    torch.save(model, run_name + '.pth')
