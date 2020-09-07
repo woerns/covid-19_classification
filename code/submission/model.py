@@ -11,7 +11,7 @@ def estimate(X_train, y_train):
     N_EPOCHS = 30
     LEARNING_RATE = 0.0001
     LABEL_MAP = {'COVID': 0, 'NonCOVID': 1}
-    DEVICE = 'cpu'
+    DEVICE = 'cuda'
 
     # Create model
     model = create_bs_resnet(output_dim=N_BOOTSTRAP, add_mask=ADD_MASK)
