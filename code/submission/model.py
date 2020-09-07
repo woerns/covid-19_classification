@@ -1,7 +1,7 @@
 import torch
 
 from utils import CTImageDataSet
-from utils import create_bs_resnet, load_data_transform, create_bs_train_loader, train, load_img_data
+from utils import create_bs_network, load_data_transform, create_bs_train_loader, train, load_img_data
 
 ADD_MASK = False
 
@@ -10,11 +10,12 @@ def estimate(X_train, y_train):
     BATCH_SIZE = 32
     N_EPOCHS = 30
     LEARNING_RATE = 0.0001
+    MODEL_NAME = 'resnet50'
     LABEL_MAP = {'COVID': 0, 'NonCOVID': 1}
     DEVICE = 'cuda'
 
     # Create model
-    model = create_bs_resnet(output_dim=N_BOOTSTRAP, add_mask=ADD_MASK)
+    model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP, add_mask=ADD_MASK)
 
     # Preprocess images and labels
     data_transform = load_data_transform(train=True, add_mask=ADD_MASK)
@@ -36,7 +37,7 @@ def estimate(X_train, y_train):
 
     # Train model
     print("Training model...")
-    train(model, bs_train_loader, n_epochs=N_EPOCHS, lr=LEARNING_RATE, val_loader=val_loader, device=DEVICE)
+    train(model, bs_train_loader, model_name=MODEL_NAME, n_epochs=N_EPOCHS, lr=LEARNING_RATE, val_loader=val_loader, device=DEVICE)
     print("Training completed.")
 
     return model

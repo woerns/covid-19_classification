@@ -71,8 +71,8 @@ def load_data_transform(train=False, add_mask=False):
         data_transform = transforms.Compose([
             # transforms.ToPILImage(),
             # transforms.RandomRotation(degrees=(-10, 10)),
-            # transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0), ratio=(1.0, 1.0)),
-            transforms.Resize(256),
+            transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0), ratio=(0.5, 1.5)),
+            # transforms.Resize((256, 256)),
             transforms.CenterCrop(224),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0, hue=0),
@@ -82,7 +82,7 @@ def load_data_transform(train=False, add_mask=False):
     else:
         data_transform = transforms.Compose([
             # transforms.ToPILImage(),
-            transforms.Resize(256),
+            transforms.Resize((256, 256)),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(mean, std)
@@ -92,31 +92,32 @@ def load_data_transform(train=False, add_mask=False):
 
 
 
-def create_bs_resnet(output_dim=10, add_mask=False):
-    # ResNet Full
-    # model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet18', pretrained=True)
-    # model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
-    model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=True)
+def create_bs_network(model_name,output_dim=10, add_mask=False):
 
-    if add_mask:
-        with torch.no_grad():
-            # Add additional input channel
-            weight = model.conv1.weight.detach().clone()
-            model.conv1 = torch.nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3,
-                                    bias=False)  # here 4 indicates 4-channel input
-            model.conv1.weight[:, :3] = weight
-            model.conv1.weight[:, 3] = model.conv1.weight[:, 2]
+    if 'resnet' in model_name:
+        # ResNet Full
+        model = torch.hub.load('pytorch/vision:v0.6.0', model_name, pretrained=True)
 
-    # Replace last layer
-    num_ftrs = model.fc.in_features
-    model.fc = torch.nn.Linear(num_ftrs, output_dim)
+        if add_mask:
+            with torch.no_grad():
+                # Add additional input channel
+                weight = model.conv1.weight.detach().clone()
+                model.conv1 = torch.nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3,
+                                        bias=False)  # here 4 indicates 4-channel input
+                model.conv1.weight[:, :3] = weight
+                model.conv1.weight[:, 3] = model.conv1.weight[:, 2]
 
-
-    # # DenseNet
-    # model = torch.hub.load('pytorch/vision:v0.6.0', 'densenet161', pretrained=True)
-    # # Replace last layer
-    # num_ftrs = model.classifier.in_features
-    # model.classifier = torch.nn.Linear(num_ftrs, output_dim)
+        # Replace last layer
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, output_dim)
+    elif 'densenet' in model_name:
+        # DenseNet
+        model = torch.hub.load('pytorch/vision:v0.6.0', model_name, pretrained=True)
+        # Replace last layer
+        num_ftrs = model.classifier.in_features
+        model.classifier = torch.nn.Linear(num_ftrs, output_dim)
+    else:
+        raise ValueError("Unknown model name.")
 
     return model
 
@@ -146,7 +147,7 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     return bs_train_loader
 
 
-def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None, device='cpu'):
+def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader=None, device='cpu'):
 
     # push model to set device (CPU or GPU)
     model.to(device)
@@ -160,7 +161,7 @@ def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None, devic
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-    writer = SummaryWriter("./runs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M"))
+    writer = SummaryWriter("./runs/" + model_name + "_" + datetime.datetime.now().strftime("%Y%m%d-%H%M"))
 
     iterators = [iter(x) for x in bs_train_loader]
 
