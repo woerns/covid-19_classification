@@ -69,10 +69,7 @@ def load_data_transform(train=False, add_mask=False):
 
     if train:
         data_transform = transforms.Compose([
-            # transforms.ToPILImage(),
-            # transforms.RandomRotation(degrees=(-10, 10)),
             transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0), ratio=(0.5, 1.5)),
-            # transforms.Resize((256, 256)),
             transforms.CenterCrop(224),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0, hue=0),
@@ -81,9 +78,7 @@ def load_data_transform(train=False, add_mask=False):
         ])
     else:
         data_transform = transforms.Compose([
-            # transforms.ToPILImage(),
-            transforms.Resize((256, 256)),
-            transforms.CenterCrop(224),
+            transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean, std)
         ])
