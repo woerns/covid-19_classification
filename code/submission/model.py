@@ -3,8 +3,6 @@ import torch
 from utils import CTImageDataSet
 from utils import create_bs_network, load_data_transform, create_bs_train_loader, train, load_img_data
 
-ADD_MASK = False
-
 def estimate(X_train, y_train):
     N_BOOTSTRAP = 10
     BATCH_SIZE = 32
@@ -15,21 +13,21 @@ def estimate(X_train, y_train):
     DEVICE = 'cuda'
 
     # Create model
-    model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP, add_mask=ADD_MASK)
+    model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP)
 
     # Preprocess images and labels
-    data_transform = load_data_transform(train=True, add_mask=ADD_MASK)
+    data_transform = load_data_transform(train=True)
     y_train = [LABEL_MAP[y] for y in y_train]
-    train_dataset = CTImageDataSet(X_train, y_train, transform=data_transform, add_mask=ADD_MASK)
+    train_dataset = CTImageDataSet(X_train, y_train, transform=data_transform)
     # Create bootstrap datasets
     bs_train_loader = create_bs_train_loader(train_dataset, N_BOOTSTRAP, batch_size=BATCH_SIZE)
 
     # Val loader
-    data_transform = load_data_transform(train=False, add_mask=ADD_MASK)
+    data_transform = load_data_transform(train=False)
     VAL_DATA_DIR = "../../val"
     X_val, y_val = load_img_data(VAL_DATA_DIR)
     y_val = [LABEL_MAP[y] for y in y_val]
-    val_dataset = CTImageDataSet(X_val, y_val, transform=data_transform, add_mask=ADD_MASK)
+    val_dataset = CTImageDataSet(X_val, y_val, transform=data_transform)
     val_loader = torch.utils.data.DataLoader(val_dataset,
                                               batch_size=1,
                                               shuffle=False,
@@ -47,8 +45,8 @@ def predict(X_test, model):
     model.eval()
 
     # Preprocess images
-    data_transform = load_data_transform(train=False, add_mask=ADD_MASK)
-    test_dataset = CTImageDataSet(X_test, [0]*len(X_test), transform=data_transform, add_mask=ADD_MASK)
+    data_transform = load_data_transform(train=False)
+    test_dataset = CTImageDataSet(X_test, [0]*len(X_test), transform=data_transform)
     test_loader = torch.utils.data.DataLoader(test_dataset,
                                                batch_size=1,
                                                shuffle=False,
