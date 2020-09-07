@@ -1,5 +1,3 @@
-import numpy as np
-
 import torch
 
 from submission.utils import CTImageDataSet
@@ -13,6 +11,8 @@ def estimate(X_train, y_train):
     N_EPOCHS = 30
     LEARNING_RATE = 0.0001
     LABEL_MAP = {'COVID': 0, 'NonCOVID': 1}
+    DEVICE = 'cpu'
+
     # Create model
     model = create_bs_resnet(output_dim=N_BOOTSTRAP, add_mask=ADD_MASK)
 
@@ -36,7 +36,7 @@ def estimate(X_train, y_train):
 
     # Train model
     print("Training model...")
-    train(model, bs_train_loader, n_epochs=N_EPOCHS, lr=LEARNING_RATE, val_loader=val_loader)
+    train(model, bs_train_loader, n_epochs=N_EPOCHS, lr=LEARNING_RATE, val_loader=val_loader, device=DEVICE)
     print("Training completed.")
 
     return model

@@ -96,7 +96,7 @@ def create_bs_resnet(output_dim=10, add_mask=False):
     # ResNet Full
     # model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet18', pretrained=True)
     # model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
-    model = torch.hub.load('pytorch/vision:v0.6.0', 'resnext50_32x4d', pretrained=True)
+    model = torch.hub.load('pytorch/vision:v0.6.0', 'resnet50', pretrained=True)
 
     if add_mask:
         with torch.no_grad():
@@ -112,8 +112,8 @@ def create_bs_resnet(output_dim=10, add_mask=False):
     model.fc = torch.nn.Linear(num_ftrs, output_dim)
 
 
-    # DenseNet
-    # model = torch.hub.load('pytorch/vision:v0.6.0', 'densenet121', pretrained=True)
+    # # DenseNet
+    # model = torch.hub.load('pytorch/vision:v0.6.0', 'densenet161', pretrained=True)
     # # Replace last layer
     # num_ftrs = model.classifier.in_features
     # model.classifier = torch.nn.Linear(num_ftrs, output_dim)
@@ -124,20 +124,33 @@ def create_bs_resnet(output_dim=10, add_mask=False):
 def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     bs_train_loader = []
     train_idx = list(range(len(dataset)))
-    for _ in range(n_bootstrap):
-        train_idx_bs = sklearn.utils.resample(train_idx, replace=True, n_samples=len(dataset))
-        train_sampler = torch.utils.data.SubsetRandomSampler(train_idx_bs)
 
+    if n_bootstrap == 1:
+        # If only one head, apply default case and do not bootstrap
         train_loader = torch.utils.data.DataLoader(dataset,
                                                    batch_size=batch_size,
-                                                   sampler=train_sampler,
+                                                   shuffle=True,
                                                    num_workers=2)
         bs_train_loader.append(train_loader)
+    else:
+        for _ in range(n_bootstrap):
+            train_idx_bs = sklearn.utils.resample(train_idx, replace=True, n_samples=len(dataset))
+            train_sampler = torch.utils.data.SubsetRandomSampler(train_idx_bs)
+
+            train_loader = torch.utils.data.DataLoader(dataset,
+                                                       batch_size=batch_size,
+                                                       sampler=train_sampler,
+                                                       num_workers=2)
+            bs_train_loader.append(train_loader)
 
     return bs_train_loader
 
 
-def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None):
+def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None, device='cpu'):
+
+    # push model to set device (CPU or GPU)
+    model.to(device)
+
     model.train()
 
     n_bootstrap = len(bs_train_loader)
@@ -164,6 +177,9 @@ def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None):
                 # restart if we reached the end of iterator
                 iterators[k] = iter(bs_train_loader[k])
                 inputs, labels = next(iterators[k])
+
+            # push tensors to set device (CPU or GPU)
+            inputs, labels = inputs.to(device), labels.to(device)
 
             # zero the parameter gradients
             # optimizer.zero_grad() # Note: this is slower
@@ -197,6 +213,9 @@ def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None):
                     with torch.no_grad():
                         for data in val_loader:
                             images, labels = data
+                            # push tensors to set device (CPU or GPU)
+                            inputs, labels = inputs.to(device), labels.to(device)
+
                             outputs = model(images)
                             # need to average multiple predictions of bootstrap net
                             mean_output = outputs.data.mean(dim=-1)
