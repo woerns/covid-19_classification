@@ -1,7 +1,7 @@
 import torch
 
-from submission.utils import CTImageDataSet
-from submission.utils import create_bs_resnet, load_data_transform, create_bs_train_loader, train, load_img_data
+from utils import CTImageDataSet
+from utils import create_bs_resnet, load_data_transform, create_bs_train_loader, train, load_img_data
 
 ADD_MASK = False
 
