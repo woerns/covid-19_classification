@@ -214,17 +214,18 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
 
                             outputs = model(images)
                             # need to average multiple predictions of bootstrap net
-                            mean_output = outputs.data.mean(dim=-1)
+                            mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
+
                             loss = criterion(mean_output, labels.float())
                             val_loss += loss.item()
 
                             # Compute accuracy
-                            predicted = (mean_output > 0).int()
+                            predicted = (mean_output >= 0.5).int()
                             total += labels.size(0)
                             correct += (predicted == labels.int()).sum().item()
 
                             # Compute class probabilities
-                            class_probs.append(torch.sigmoid(mean_output).cpu().numpy())
+                            class_probs.append(mean_output.cpu().numpy())
                             y_pred.append(predicted.cpu().numpy())
                             y_test.append(labels.cpu().numpy())
 

@@ -45,6 +45,7 @@ def estimate(X_train, y_train):
 
 def predict(X_test, model):
     model.eval()
+
     # Preprocess images
     data_transform = load_data_transform(train=False, add_mask=ADD_MASK)
     test_dataset = CTImageDataSet(X_test, [0]*len(X_test), transform=data_transform, add_mask=ADD_MASK)
@@ -60,8 +61,9 @@ def predict(X_test, model):
             images, dummy_targets = data
             outputs = model(images)
             # need to average multiple predictions of bootstrap ResNet
-            mean_output = outputs.data.mean(dim=-1)
-            predicted = (mean_output > 0).int()
+            mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
+            predicted = (mean_output > 0.5).int()
+
             if predicted == 1:
                 y_pred.append('COVID')
             else:
