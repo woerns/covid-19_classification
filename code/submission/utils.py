@@ -225,12 +225,12 @@ def train(model, bs_train_loader, n_epochs=10, lr=0.0001, val_loader=None, devic
                             # Compute accuracy
                             predicted = (mean_output > 0).int()
                             total += labels.size(0)
-                            correct += (predicted == labels).sum().item()
+                            correct += (predicted == labels.int()).sum().item()
 
                             # Compute class probabilities
-                            class_probs.append(torch.sigmoid(mean_output).numpy())
-                            y_pred.append(predicted.numpy())
-                            y_test.append(labels.numpy())
+                            class_probs.append(torch.sigmoid(mean_output).cpu().numpy())
+                            y_pred.append(predicted.cpu().numpy())
+                            y_test.append(labels.cpu().numpy())
 
                     y_test = np.concatenate(y_test)
                     y_pred = np.concatenate(y_pred)
