@@ -4,8 +4,8 @@ import random
 import torch
 import time
 
-from submission.utils import load_img_data
-from submission.model import estimate
+from utils import load_img_data
+from model import estimate, predict
 
 
 def run_test():
@@ -25,16 +25,15 @@ def run_test():
     time_elapsed = time.time() - start
     print(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
 
-    # Save model
-    # torch.save(model, 'resnet18_augv2.pickle')
-
     # Load model
-    # model = torch.load('Model.pickle')
+    model = torch.load('densenet169_nbootstrap10.pth', map_location=torch.device('cpu'))
+    TEST_DATA_DIR = "../../dataset/val"
+    X_test, y_test = load_img_data(TEST_DATA_DIR)
 
-    # y_pred = predict(X_test, model)
+    y_pred = predict(X_test, model)
+
+    print("done")
 
 
 if __name__ == '__main__':
     run_test()
-
-    print("done.")

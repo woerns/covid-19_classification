@@ -45,8 +45,8 @@ def estimate(X_train, y_train):
 
 
 def predict(X_test, model=None):
-    import torch
-    model = torch.load(model+'/Model.pth', map_location=torch.device('cpu'))
+    # import torch
+    # model = torch.load(model+'/Model.pth', map_location=torch.device('cpu'))
 
     model.eval()
 
