@@ -8,9 +8,9 @@ def estimate(X_train, y_train):
     BATCH_SIZE = 32
     N_EPOCHS = 30
     LEARNING_RATE = 0.0001
-    MODEL_NAME = 'resnet50'
+    MODEL_NAME = 'densenet169'
     LABEL_MAP = {'COVID': 1, 'NonCOVID': 0}
-    DEVICE = 'cuda'
+    DEVICE = 'cpu'
 
     # Create model
     model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP)
@@ -23,15 +23,18 @@ def estimate(X_train, y_train):
     bs_train_loader = create_bs_train_loader(train_dataset, N_BOOTSTRAP, batch_size=BATCH_SIZE)
 
     # Val loader
-    data_transform = load_data_transform(train=False)
-    VAL_DATA_DIR = "../../val"
-    X_val, y_val = load_img_data(VAL_DATA_DIR)
-    y_val = [LABEL_MAP[y] for y in y_val]
-    val_dataset = CTImageDataSet(X_val, y_val, transform=data_transform)
-    val_loader = torch.utils.data.DataLoader(val_dataset,
-                                              batch_size=1,
-                                              shuffle=False,
-                                              num_workers=2)
+    VAL_DATA_DIR = None  # Please specify directory where validation data is stored
+    if VAL_DATA_DIR is not None:
+        data_transform = load_data_transform(train=False)
+        X_val, y_val = load_img_data(VAL_DATA_DIR)
+        y_val = [LABEL_MAP[y] for y in y_val]
+        val_dataset = CTImageDataSet(X_val, y_val, transform=data_transform)
+        val_loader = torch.utils.data.DataLoader(val_dataset,
+                                                  batch_size=1,
+                                                  shuffle=False,
+                                                  num_workers=2)
+    else:
+        val_loader = None
 
     # Train model
     print("Training model...")
@@ -41,7 +44,10 @@ def estimate(X_train, y_train):
     return model
 
 
-def predict(X_test, model):
+def predict(X_test, model=None):
+    import torch
+    model = torch.load(model+'/Model.pth', map_location=torch.device('cpu'))
+
     model.eval()
 
     # Preprocess images
