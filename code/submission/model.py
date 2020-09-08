@@ -66,7 +66,8 @@ def predict(X_test, model=None):
             outputs = model(images)
             # need to average multiple predictions of bootstrap ResNet
             mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
-            predicted = (mean_output > 0.5).int()
+            std_output = torch.sigmoid(outputs).data.std(dim=-1)
+            predicted = (mean_output + 2*std_output > 0.5).int()
 
             if predicted == 1:
                 y_pred.append('COVID')
