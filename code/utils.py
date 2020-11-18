@@ -2,6 +2,7 @@ import random
 import datetime
 
 import numpy as np
+import pandas as pd
 import sklearn
 import sklearn.metrics
 
@@ -47,16 +48,35 @@ class CTImageDataSet(torch.utils.data.Dataset):
         return sample, target
 
 
+def load_patient_group_map():
+    covid_metainfo = pd.read_excel("../../dataset/CT-MetaInfo.xlsx", sheet_name='COVID-CT-info')
+    non_covid_metainfo = pd.read_excel("../../dataset/CT-MetaInfo.xlsx", sheet_name='NonCOVID-CT-info')
+
+    covid_metainfo['File name'] = covid_metainfo['File name'].str.replace('%', '_')
+    non_covid_metainfo['image name'] = non_covid_metainfo['image name'].str.replace('%', '_')
+
+    patient_group_map = {**covid_metainfo.set_index('File name')['Patient ID'].to_dict(),
+                         **non_covid_metainfo.set_index('image name')['patient id'].to_dict()}
+
+    return patient_group_map
+
 def load_img_data(data_dir):
+    LABEL_MAP = {'COVID': 1, 'NonCOVID': 0}
+    PATIENT_GROUP_MAP = load_patient_group_map()
+
     dataset = datasets.ImageFolder(root=data_dir)
+
 
     X = []
     y = []
-    for img, target in dataset:
+    groups = []
+    for i, (img, target) in enumerate(dataset):
         X.append(np.array(img))
-        y.append(dataset.classes[target].split('_')[-1])    # Assuming folder label has prefix "CT_"
+        y.append(LABEL_MAP[dataset.classes[target].split('_')[-1]])    # Assuming folder label has prefix "CT_"
+        img_name = dataset.imgs[i][0].split('/')[-1]
+        groups.append(PATIENT_GROUP_MAP[img_name]) # Patient group
 
-    return X, y
+    return X, y, groups
 
 
 def load_data_transform(train=False, add_mask=False):
@@ -84,7 +104,6 @@ def load_data_transform(train=False, add_mask=False):
         ])
 
     return data_transform
-
 
 
 def create_bs_network(model_name,output_dim=10, add_mask=False):
@@ -142,7 +161,7 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     return bs_train_loader
 
 
-def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader=None, device='cpu'):
+def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, std_threshold=0, val_loader=None, device='cpu'):
 
     # push model to set device (CPU or GPU)
     model.to(device)
@@ -152,11 +171,15 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
     n_bootstrap = len(bs_train_loader)
     steps_per_epoch = len(bs_train_loader[0])
     criterion = torch.nn.BCEWithLogitsLoss()
+    criterion_prob = torch.nn.BCELoss()
     # optimizer = torch.optim.SGD(model.parameters(), lr=0.002, momentum=0.9, weight_decay=0.0001)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-    run_name = model_name + "_" + datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    run_name = "_".join([model_name,
+                         "bs{0:d}".format(n_bootstrap),
+                         "stdth{0:d}".format(std_threshold),
+                         datetime.datetime.now().strftime("%Y%m%d-%H%M")])
     writer = SummaryWriter("./runs/" + run_name)
 
     iterators = [iter(x) for x in bs_train_loader]
@@ -194,7 +217,7 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
             writer.add_scalar('Loss/train', loss.float(), epoch * steps_per_epoch + i + 1)
 
             if i % 10 == 9:  # print every 10 mini-batches
-                print('[%d, %3d] train_loss: %.3f' %
+                print('[%d, %3d] train_loss: %.5f' %
                       (epoch + 1, i + 1, running_loss / 10))
 
                 running_loss = 0.0
@@ -216,14 +239,19 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
                             outputs = model(images)
                             # need to average multiple predictions of bootstrap net
                             mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
+                            if n_bootstrap > 1:
+                                std_output = torch.sigmoid(outputs).data.std(dim=-1)
+                            else:
+                                std_output = 0
 
-                            loss = criterion(mean_output, labels.float())
+                            loss = criterion_prob(mean_output, labels.float())
                             val_loss += loss.item()
 
                             # Compute accuracy
-                            predicted = (mean_output >= 0.5).int()
+                            predicted = (mean_output + std_threshold * std_output > 0.5).int()
                             total += labels.size(0)
                             correct += (predicted == labels.int()).sum().item()
+                            acc = correct / total
 
                             # Compute class probabilities
                             class_probs.append(mean_output.cpu().numpy())
@@ -236,12 +264,12 @@ def train(model, bs_train_loader, model_name, n_epochs=10, lr=0.0001, val_loader
 
                     print('[%d, %3d] val_loss: %.3f' %
                           (epoch + 1, i + 1, val_loss / len(val_loader)))
-                    print('[%d, %3d] val_acc: %.1f %%' % (epoch + 1, i + 1, 100 * correct / total))
+                    print('[%d, %3d] val_acc: %.1f %%' % (epoch + 1, i + 1, 100 * acc))
                     model.train()
 
                     # Write to tensorboard
                     writer.add_scalar('Loss/val', val_loss / len(val_loader), epoch * steps_per_epoch + i + 1)
-                    writer.add_scalar('Acc/val', correct / total, epoch * steps_per_epoch + i + 1)
+                    writer.add_scalar('Acc/val', acc, epoch * steps_per_epoch + i + 1)
                     writer.add_scalar('AUC/val', sklearn.metrics.roc_auc_score(y_test, class_probs), epoch * steps_per_epoch + i + 1)
                     writer.add_scalar('F1/val', sklearn.metrics.f1_score(y_test, y_pred), epoch * steps_per_epoch + i + 1)
 
