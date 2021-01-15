@@ -1,18 +1,24 @@
 import torch
 
-from utils import CTImageDataSet
-from utils import create_bs_network, load_data_transform, create_bs_train_loader, train, load_img_data
+from data import CTImageDataSet
+from utils import create_bs_network, load_data_transform, create_bs_train_loader, train
 
 import sklearn
 import sklearn.model_selection
 
-def estimate(X_train, y_train):
-    N_BOOTSTRAP = 10
-    BATCH_SIZE = 32
-    N_EPOCHS = 30
-    LEARNING_RATE = 0.0001
-    MODEL_NAME = 'densenet169'
-    DEVICE = 'cpu'
+
+def estimate(X_train, y_train, args):
+    """
+        Function to train model on input data.
+    """
+    N_BOOTSTRAP = args.bs_heads
+    STD_THRESHOLD = args.std_threshold
+    BATCH_SIZE = args.batch_size
+    N_EPOCHS = args.n_epochs
+    LEARNING_RATE = args.learning_rate
+    MODEL_NAME = args.model_name
+    RUN_NAME = args.run_name
+    DEVICE = args.device
 
     # Create model
     model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP)
@@ -23,38 +29,35 @@ def estimate(X_train, y_train):
     # Create bootstrap datasets
     bs_train_loader = create_bs_train_loader(train_dataset, N_BOOTSTRAP, batch_size=BATCH_SIZE)
 
-    # Val loader
-    VAL_DATA_DIR = None  # Please specify directory where validation data is stored
-    if VAL_DATA_DIR is not None:
-        data_transform = load_data_transform(train=False)
-        X_val, y_val = load_img_data(VAL_DATA_DIR)
-        val_dataset = CTImageDataSet(X_val, y_val, transform=data_transform)
-        val_loader = torch.utils.data.DataLoader(val_dataset,
-                                                  batch_size=1,
-                                                  shuffle=False,
-                                                  num_workers=2)
-    else:
-        val_loader = None
-
     # Train model
     print("Training model...")
-    train(model, bs_train_loader, model_name=MODEL_NAME, n_epochs=N_EPOCHS, lr=LEARNING_RATE, val_loader=val_loader, device=DEVICE)
+    train(model, bs_train_loader, run_name=RUN_NAME, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
+          std_threshold=STD_THRESHOLD, device=DEVICE)
     print("Training completed.")
 
     return model
 
 
-def crossvalidate(X, y, groups, n_folds=5):
-    N_BOOTSTRAP = 10
-    STD_THRESHOLD = 0
-    BATCH_SIZE = 32
-    N_EPOCHS = 30
-    LEARNING_RATE = 0.0001
-    MODEL_NAME = 'densenet169'
-    DEVICE = 'cpu'
+def crossvalidate(X, y, groups, args):
+    """
+        Function to cross-validate model on input data.
+    """
+    N_BOOTSTRAP = args.bs_heads
+    STD_THRESHOLD = args.std_threshold
+    BATCH_SIZE = args.batch_size
+    N_EPOCHS = args.n_epochs
+    LEARNING_RATE = args.learning_rate
+    MODEL_NAME = args.model_name
+    RUN_NAME = args.run_name
+    DEVICE = args.device
+    CV_FOLDS = args.cv_folds
+
+    print("Run configuration:")
+    for k, v in args.__dict__.items():
+        print("{0}: {1}".format(k, v))
 
     # Create cross-validation splits
-    group_kfold = sklearn.model_selection.GroupKFold(n_splits=n_folds)
+    group_kfold = sklearn.model_selection.GroupKFold(n_splits=CV_FOLDS)
     models = []
 
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
@@ -65,14 +68,14 @@ def crossvalidate(X, y, groups, n_folds=5):
         print("Training samples: %d" % len(y_train))
         print("Validation samples: %d" % len(y_val))
 
-        # Create train dataset
+        # Create train datasets
         train_data_transform = load_data_transform(train=True)
         train_dataset = CTImageDataSet(X_train, y_train, transform=train_data_transform)
 
         # Create bootstrap datasets
         bs_train_loader = create_bs_train_loader(train_dataset, N_BOOTSTRAP, batch_size=BATCH_SIZE)
 
-        # Create validation dataset
+        # Create validation datasets
         val_data_transform = load_data_transform(train=False)
         val_dataset = CTImageDataSet(X_val, y_val, transform=val_data_transform)
         val_loader = torch.utils.data.DataLoader(val_dataset,
@@ -84,7 +87,7 @@ def crossvalidate(X, y, groups, n_folds=5):
 
         # Train model
         print("Training model...")
-        train(model, bs_train_loader, model_name=MODEL_NAME+"_fold{0:d}".format(fold), n_epochs=N_EPOCHS,
+        train(model, bs_train_loader, run_name=RUN_NAME+"_fold{0:d}".format(fold), n_epochs=N_EPOCHS,
               lr=LEARNING_RATE, std_threshold=STD_THRESHOLD, val_loader=val_loader, device=DEVICE)
         print("Training completed.")
 
