@@ -55,11 +55,11 @@ def load_ai4h_patient_group_map(data_dir):
     return patient_group_map
 
 
-def load_ai4h_img_data(data_dir):
+def load_ai4h_img_data(data_dir, dataset_version):
     LABEL_MAP = {'COVID': 1, 'NonCOVID': 0}
     PATIENT_GROUP_MAP = load_ai4h_patient_group_map(data_dir)
 
-    dataset = datasets.ImageFolder(root=os.path.join(data_dir, 'full'))
+    dataset = datasets.ImageFolder(root=os.path.join(data_dir, dataset_version))
 
     X = []
     y = []
@@ -73,10 +73,10 @@ def load_ai4h_img_data(data_dir):
     return X, y, groups
 
 
-def load_dataset(dataset_name, data_root_dir):
+def load_dataset(dataset_name, data_root_dir, dataset_version='full'):
     if dataset_name == 'ucsd-ai4h':
         data_dir = os.path.join(data_root_dir, 'ucsd-ai4h')
-        X, y, groups = load_ai4h_img_data(data_dir)
+        X, y, groups = load_ai4h_img_data(data_dir, dataset_version)
     else:
         raise ValueError("Unknown dataset name %s." % dataset_name)
 

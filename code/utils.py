@@ -1,3 +1,4 @@
+import os
 import random
 
 import numpy as np
@@ -202,4 +203,5 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, std_threshol
         scheduler.step()
 
     # Save model
-    torch.save(model, run_name + '.pth')
+    model_save_dir = "./models"
+    torch.save(model, os.path.join(model_save_dir, run_name + '.pth'))
