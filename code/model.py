@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from data import CTImageDataSet
@@ -98,7 +99,7 @@ def crossvalidate(X, y, groups, args):
     return models
 
 
-def predict(X_test, model=None):
+def predict(X_test, model=None, std_threshold=0.0):
     # import torch
     # model = torch.load(model+'/Model.pth', map_location=torch.device('cpu'))
 
@@ -113,19 +114,27 @@ def predict(X_test, model=None):
                                                num_workers=2)
 
     y_pred = []
+    dydX = []
 
-    with torch.no_grad():
-        for data in test_loader:
-            images, dummy_targets = data
-            outputs = model(images)
-            # need to average multiple predictions of bootstrap net
-            mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
-            std_output = torch.sigmoid(outputs).data.std(dim=-1)
-            predicted = (mean_output + 2*std_output > 0.5).int()
+    for data in test_loader:
+        images, dummy_targets = data
+        images.requires_grad = True
+        outputs = model(images)
+        input_grads = []
+        bs_heads = len(outputs[0])
+        for i in range(bs_heads):
+            input_grad = torch.autograd.grad(outputs[0][i], images, retain_graph=(i<bs_heads))[0]
+            input_grads.append(input_grad[0].mean(axis=0).numpy())  # Average across all RGB channels
+        dydX.append(np.stack(input_grads))
 
-            if predicted == 1:
-                y_pred.append('COVID')
-            else:
-                y_pred.append('NonCOVID')
+        # need to average multiple predictions of bootstrap net
+        mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
+        std_output = torch.sigmoid(outputs).data.std(dim=-1)
+        predicted = (mean_output + std_threshold*std_output > 0.5).int()
 
-    return y_pred
+        if predicted == 1:
+            y_pred.append('COVID')
+        else:
+            y_pred.append('NonCOVID')
+
+    return y_pred, dydX
