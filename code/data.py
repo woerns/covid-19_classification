@@ -43,8 +43,8 @@ class CTImageDataSet(torch.utils.data.Dataset):
 
 def load_ai4h_patient_group_map(data_dir):
     metainfo_file = os.path.join(data_dir, 'CT-MetaInfo.xlsx')
-    covid_metainfo = pd.read_excel(metainfo_file, sheet_name='COVID-CT-info')
-    non_covid_metainfo = pd.read_excel(metainfo_file, sheet_name='NonCOVID-CT-info')
+    covid_metainfo = pd.read_excel(metainfo_file, sheet_name='COVID-CT-info', engine='openpyxl')
+    non_covid_metainfo = pd.read_excel(metainfo_file, sheet_name='NonCOVID-CT-info', engine='openpyxl')
 
     covid_metainfo['File name'] = covid_metainfo['File name'].str.replace('%', '_')
     non_covid_metainfo['image name'] = non_covid_metainfo['image name'].str.replace('%', '_')
