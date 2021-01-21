@@ -11,6 +11,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 
+from plots import plot_pred_reliability, plot_uncertainty_reliability
+
 
 def load_data_transform(train=False, add_mask=False):
     if add_mask:
@@ -239,7 +241,16 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_l
                     writer.add_scalar('AUC/val', sklearn.metrics.roc_auc_score(y_test, class_probs), epoch * steps_per_epoch + i + 1)
                     writer.add_scalar('F1/val', sklearn.metrics.f1_score(y_test, y_pred), epoch * steps_per_epoch + i + 1)
 
+                    writer.add_figure('Prediction reliability/val', plot_pred_reliability(class_probs, y_test, bins=10), epoch * steps_per_epoch + i + 1)
+                    if confidence_level is not None:
+                        writer.add_figure('Uncertainty reliability/val',
+                                     plot_uncertainty_reliability(class_probs, posterior_params, y_test, bins=10),
+                                     epoch * steps_per_epoch + i + 1)
+                    writer.flush()
+
         scheduler.step()
+
+    writer.close()
 
     # Save model
     print("Saving model...")
