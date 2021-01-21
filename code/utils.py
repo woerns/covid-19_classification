@@ -2,6 +2,8 @@ import os
 import random
 
 import numpy as np
+import scipy as sp
+import scipy.stats
 import sklearn
 import sklearn.metrics
 
@@ -92,7 +94,23 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     return bs_train_loader
 
 
-def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, std_threshold=0, val_loader=None, device='cpu'):
+def compute_beta_quantile(pred_probs, confidence_level=0.95):
+    # Fit beta distribution using method-of-moments
+    # and compute quantile of given probability
+    mean = pred_probs.mean()
+    var = pred_probs.var()
+    v = (mean*(1-mean)/var-1.0)
+    alpha = mean*v
+    beta = (1-mean)*v
+
+    quantile = sp.stats.beta.ppf(confidence_level, alpha, beta)
+
+    return quantile, (alpha, beta)
+
+
+def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_level=None, val_loader=None, fold=None, device='cpu'):
+    # Null hypothesis for uncertainty-based decision rule. Can be either 'covid' or 'non-covid' (default).
+    NULL_HYPOTHESIS = 'non-covid'
 
     # push model to set device (CPU or GPU)
     model.to(device)
@@ -107,7 +125,11 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, std_threshol
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-    writer = SummaryWriter("./runs/" + run_name)
+    log_dir = os.path.join("./runs", run_name)
+    if fold is not None:
+        log_dir = os.path.join(log_dir, "fold{0:d}".format(fold))
+
+    writer = SummaryWriter(log_dir)
 
     iterators = [iter(x) for x in bs_train_loader]
 
@@ -156,6 +178,8 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, std_threshol
                     class_probs = []
                     y_test = []
                     y_pred = []
+                    quantiles = []
+                    posterior_params = []
 
                     with torch.no_grad():
                         for data in val_loader:
@@ -164,24 +188,39 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, std_threshol
                             images, labels = images.to(device), labels.to(device)
 
                             outputs = model(images)
+                            pred_probs = torch.sigmoid(outputs).data
                             # need to average multiple predictions of bootstrap net
-                            mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
-                            if n_bootstrap > 1:
-                                std_output = torch.sigmoid(outputs).data.std(dim=-1)
-                            else:
-                                std_output = 0
+                            mean_prob = pred_probs.mean(dim=-1)
 
-                            loss = criterion_prob(mean_output, labels.float())
+                            loss = criterion_prob(mean_prob, labels.float())
                             val_loss += loss.item()
 
+                            if confidence_level is not None:
+                                # Uncertainty-based decision rule
+                                if NULL_HYPOTHESIS == 'non-covid':
+                                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(), confidence_level=confidence_level)
+                                elif NULL_HYPOTHESIS == 'covid':
+                                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(), confidence_level=1-confidence_level)
+                                else:
+                                    raise ValueError('Null hypothesis must be either covid or non-covid.')
+
+                                predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
+                                quantiles.append(quantile)
+                                posterior_params.append(params)
+                            else:
+                                predicted = (mean_prob > 0.5).int()
+
+                            # print("mean_prob: %.2f" % mean_prob.numpy())
+                            # print("quantile: % .2f" % quantile)
+                            # print("y_true: %d" % labels.int().item())
+
                             # Compute accuracy
-                            predicted = (mean_output + std_threshold * std_output > 0.5).int()
                             total += labels.size(0)
                             correct += (predicted == labels.int()).sum().item()
                             acc = correct / total
 
                             # Compute class probabilities
-                            class_probs.append(mean_output.cpu().numpy())
+                            class_probs.append(mean_prob.cpu().numpy())
                             y_pred.append(predicted.cpu().numpy())
                             y_test.append(labels.cpu().numpy())
 
@@ -203,5 +242,13 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, std_threshol
         scheduler.step()
 
     # Save model
+    print("Saving model...")
     model_save_dir = "./models"
-    torch.save(model, os.path.join(model_save_dir, run_name + '.pth'))
+    if not os.path.isdir(model_save_dir):
+        os.mkdir(model_save_dir)
+    if fold is not None:
+        model_file_name = run_name + "_fold{}.pth".format(fold)
+    else:
+        model_file_name = run_name + '.pth'
+    torch.save(model, os.path.join(model_save_dir, model_file_name))
+    print("Done.")

@@ -13,7 +13,7 @@ def estimate(X_train, y_train, args):
         Function to train model on input data.
     """
     N_BOOTSTRAP = args.bs_heads
-    STD_THRESHOLD = args.std_threshold
+    CONFIDENCE_LEVEL = args.conf_level
     BATCH_SIZE = args.batch_size
     N_EPOCHS = args.n_epochs
     LEARNING_RATE = args.learning_rate
@@ -33,7 +33,7 @@ def estimate(X_train, y_train, args):
     # Train model
     print("Training model...")
     train(model, bs_train_loader, run_name=RUN_NAME, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
-          std_threshold=STD_THRESHOLD, device=DEVICE)
+          confidence_level=CONFIDENCE_LEVEL, device=DEVICE)
     print("Training completed.")
 
     return model
@@ -44,7 +44,7 @@ def crossvalidate(X, y, groups, args):
         Function to cross-validate model on input data.
     """
     N_BOOTSTRAP = args.bs_heads
-    STD_THRESHOLD = args.std_threshold
+    CONFIDENCE_LEVEL = args.conf_level
     BATCH_SIZE = args.batch_size
     N_EPOCHS = args.n_epochs
     LEARNING_RATE = args.learning_rate
@@ -88,8 +88,8 @@ def crossvalidate(X, y, groups, args):
 
         # Train model
         print("Training model...")
-        train(model, bs_train_loader, run_name=RUN_NAME+"_fold{0:d}".format(fold), n_epochs=N_EPOCHS,
-              lr=LEARNING_RATE, std_threshold=STD_THRESHOLD, val_loader=val_loader, device=DEVICE)
+        train(model, bs_train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS,
+              lr=LEARNING_RATE, confidence_level=CONFIDENCE_LEVEL, val_loader=val_loader, device=DEVICE)
         print("Training completed.")
 
         models.append(model)

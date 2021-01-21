@@ -25,7 +25,7 @@ def run_cv():
     parser.add_argument('-r', '--run_name', type=str, default='')
     parser.add_argument('-m', '--model_name', default='densenet169')
     parser.add_argument('--bs_heads', type=int, default=10)
-    parser.add_argument('--std_threshold', type=float, default=0.0)
+    parser.add_argument('--conf_level', type=float, default=0.95)
 
     # Training parameters
     parser.add_argument('--n_epochs', type=int, default=30)
@@ -45,12 +45,18 @@ def run_cv():
     parser.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
     parser.add_argument('--seed', type=int, default=42)
 
+    # Process input arguments
     args = parser.parse_args()
+    if args.bs_heads == 1:
+        args.conf_level = 0.0
     if args.run_name == '':
         args.run_name = "_".join([args.model_name,
                              "bs{0:d}".format(args.bs_heads),
-                             "stdth{0:.1f}".format(args.std_threshold),
+                             "cl{0:.2f}".format(args.conf_level),
                              datetime.datetime.now().strftime("%Y%m%d-%H%M")])
+    if args.conf_level == 0.0:
+        args.conf_level = None
+
     start = time.time()
 
     # Set seeds
