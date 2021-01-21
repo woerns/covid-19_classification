@@ -219,6 +219,7 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_l
                             # Compute accuracy
                             total += labels.size(0)
                             correct += (predicted == labels.int()).sum().item()
+                            # correct += (predicted.detach().cpu() == labels.int().detach().cpu()).sum().item()
                             acc = correct / total
 
                             # Compute class probabilities
