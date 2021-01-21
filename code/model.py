@@ -82,7 +82,7 @@ def crossvalidate(X, y, groups, args):
         val_loader = torch.utils.data.DataLoader(val_dataset,
                                                    batch_size=1,
                                                    shuffle=False,
-                                                   num_workers=2)
+                                                   num_workers=0)
         # Create model
         model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP)
 
@@ -111,7 +111,7 @@ def predict(X_test, model=None, std_threshold=0.0):
     test_loader = torch.utils.data.DataLoader(test_dataset,
                                                batch_size=1,
                                                shuffle=False,
-                                               num_workers=2)
+                                               num_workers=0)
 
     y_pred = []
     dydX = []

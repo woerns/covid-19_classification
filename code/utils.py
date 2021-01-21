@@ -78,7 +78,7 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
         train_loader = torch.utils.data.DataLoader(dataset,
                                                    batch_size=batch_size,
                                                    shuffle=True,
-                                                   num_workers=2)
+                                                   num_workers=0)
         bs_train_loader.append(train_loader)
     else:
         for _ in range(n_bootstrap):
@@ -88,7 +88,7 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
             train_loader = torch.utils.data.DataLoader(dataset,
                                                        batch_size=batch_size,
                                                        sampler=train_sampler,
-                                                       num_workers=2)
+                                                       num_workers=0)
             bs_train_loader.append(train_loader)
 
     return bs_train_loader
