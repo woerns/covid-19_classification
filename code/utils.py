@@ -83,13 +83,13 @@ def compute_beta_quantile(pred_probs, confidence_level=0.95):
     return quantile, (alpha, beta)
 
 
-def evaluate(model, val_loader, writer, step_num, batch_num, epoch, null_hypothesis='non-covid',
+def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-covid',
              confidence_level=None, calibration_model=None, tag='val', device='cpu'):
     criterion_prob = torch.nn.BCELoss()
     eval_results = {}
 
     total = correct = 0.0
-    val_loss = 0.0
+    avg_loss = 0.0
     class_probs = []
     y_true = []
     y_pred = []
@@ -114,7 +114,7 @@ def evaluate(model, val_loader, writer, step_num, batch_num, epoch, null_hypothe
             mean_prob = pred_probs.mean(dim=-1).view(1)
     
             loss = criterion_prob(mean_prob, labels.float())
-            val_loss += loss.item()
+            avg_loss += loss.item()
     
             if confidence_level is not None:
                 # Uncertainty-based decision rule
@@ -147,16 +147,16 @@ def evaluate(model, val_loader, writer, step_num, batch_num, epoch, null_hypothe
             y_pred.append(predicted.cpu().numpy())
             y_true.append(labels.cpu().numpy())
 
+    avg_loss /= len(val_loader)
     y_true = np.concatenate(y_true)
     y_pred = np.concatenate(y_pred)
     class_probs = np.concatenate(class_probs)
 
-    print('[%d, %3d] {}_loss: %.3f'.format(tag) %
-          (epoch + 1, batch_num + 1, val_loss / len(val_loader)))
-    print('[%d, %3d] {}_acc: %.1f %%'.format(tag) % (epoch + 1, batch_num + 1, 100 * acc))
+    print('[%d] {}_loss: %.3f'.format(tag) % (epoch, avg_loss))
+    print('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
 
     # Write to tensorboard
-    writer.add_scalar('Loss/{}'.format(tag), val_loss / len(val_loader), step_num)
+    writer.add_scalar('Loss/{}'.format(tag), avg_loss, step_num)
     writer.add_scalar('Acc/{}'.format(tag), acc, step_num)
     writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs), step_num)
     writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred), step_num)
@@ -185,7 +185,7 @@ def evaluate(model, val_loader, writer, step_num, batch_num, epoch, null_hypothe
 
 def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
           bootstrap=False, fold=None, confidence_level=None, null_hypothesis=None,
-          val_loader=None, test_loader=None, device='cpu'):
+          val_loader=None, test_loader=None, eval_interval=5, device='cpu'):
     if bootstrap:
         assert isinstance(train_loader, list) and len(train_loader) > 0, \
             "Must pass in list of bootstrapped train loaders when applying bootstrap."
@@ -221,7 +221,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag
 
     global_step_num = 0
 
-    for epoch in range(n_epochs):  # loop over the datasets multiple times
+    for epoch in range(1, n_epochs+1):  # loop over the datasets multiple times
         running_loss = 0.0
 
         for i in range(steps_per_epoch):
@@ -262,53 +262,57 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag
 
             loss.backward()
 
-            if swag and epoch + 1 >= swag_start_epoch:
+            if swag and epoch >= swag_start_epoch:
                 swag_optimizer.step()
                 if bootstrap and isinstance(model, NetEnsemble):
                     model.update_swag(k) # Only update SWAG params for kth model
                 else:
                     model.update_swag() # Update SWAG params for all models
-                writer.add_scalar('Learning rate/swag', swag_optimizer.param_groups[0]['lr'], global_step_num)
             else:
                 optimizer.step()
-                writer.add_scalar('Learning rate/main', optimizer.param_groups[0]['lr'], global_step_num)
+
             global_step_num += 1
 
             # print statistics
             running_loss += loss.item()
-            writer.add_scalar('Loss/train', loss.float(), global_step_num)
 
-            if i % 10 == 9:  # print every 10 mini-batches
-                print('[%d, %3d] train_loss: %.5f' %
-                      (epoch + 1, i + 1, running_loss / 10))
+            if i % 10 == 0:  # print every 10 mini-batches
+                if i > 0:
+                    print('[%d, %3d] train_loss: %.5f' % (epoch, i, running_loss / 10))
+                    running_loss = 0.0
 
-                running_loss = 0.0
+                writer.add_scalar('Loss/train', loss.float(), global_step_num)
+                if swag and epoch >= swag_start_epoch:
+                    writer.add_scalar('Learning rate/swag', swag_optimizer.param_groups[0]['lr'], global_step_num)
+                else:
+                    writer.add_scalar('Learning rate/main', optimizer.param_groups[0]['lr'], global_step_num)
 
-                if val_loader is not None:
-                    if swag and epoch + 1 >= swag_start_epoch:
-                        print("Sampling SWAG models...")
-                        model.sample()
-                    print("Evaluating model on validation data...")
-                    results['val'] = evaluate(model, val_loader, writer, global_step_num, i, epoch,
-                            null_hypothesis=null_hypothesis,
-                            confidence_level=confidence_level,
-                            tag='val',
-                            device=device)
+        if epoch % eval_interval == 0:
+            if val_loader is not None:
+                if swag and epoch + 1 >= swag_start_epoch:
+                    print("Sampling SWAG models...")
+                    model.sample()
+                print("Evaluating model on validation data...")
+                results['val'] = evaluate(model, val_loader, writer, global_step_num, epoch,
+                        null_hypothesis=null_hypothesis,
+                        confidence_level=confidence_level,
+                        tag='val',
+                        device=device)
 
-                    if 'uncertainty_calibration_data' in results['val']:
-                        print("Fitting calibration model...")
-                        calibration_model = fit_calibration_model(results['val']['uncertainty_calibration_data'])
-                    else:
-                        calibration_model = None
+                if 'uncertainty_calibration_data' in results['val']:
+                    print("Fitting calibration model...")
+                    calibration_model = fit_calibration_model(results['val']['uncertainty_calibration_data'])
+                else:
+                    calibration_model = None
 
-                if test_loader is not None:
-                    print("Evaluating model on test data...")
-                    results['test'] = evaluate(model, test_loader, writer, global_step_num, i, epoch,
-                                               null_hypothesis=null_hypothesis,
-                                               confidence_level=confidence_level,
-                                               calibration_model=calibration_model,
-                                               tag='test',
-                                               device=device)
+            if test_loader is not None:
+                print("Evaluating model on test data...")
+                results['test'] = evaluate(model, test_loader, writer, global_step_num, epoch,
+                                           null_hypothesis=null_hypothesis,
+                                           confidence_level=confidence_level,
+                                           calibration_model=calibration_model,
+                                           tag='test',
+                                           device=device)
 
         scheduler.step()
 

@@ -39,6 +39,7 @@ def run_cv():
     parser.add_argument('--swag_start', type=float, default=0.8)
     parser.add_argument('--cv_folds', type=int, default=5)
     parser.add_argument('--bootstrap', action='store_true', default=False)
+    parser.add_argument('--eval_interval', type=int, default=5)
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='ucsd-ai4h')
