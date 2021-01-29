@@ -1,4 +1,5 @@
 import os
+import json
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -61,6 +62,9 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     print("Run configuration:")
     for k, v in args.__dict__.items():
         print("{0}: {1}".format(k, v))
+
+    with open(os.path.join('./models', RUN_NAME + '.txt'), 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
 
     if X_test is not None and y_test is not None:
         # Create test dataset
