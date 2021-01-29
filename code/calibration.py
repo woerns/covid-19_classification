@@ -55,7 +55,7 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calib
     assert len(class_probs) == len(posterior_params), "class_probs and posterior_params must have same length."
     
     N = len(class_probs)
-    bin_centers, _, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
+    bin_centers, _, _, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     cum_probs = np.zeros_like(class_probs)
     for i in range(N):
