@@ -1,8 +1,11 @@
-import numpy as np
+import os
+
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from data import CTImageDataSet
-from utils import create_bs_network, load_data_transform, create_bs_train_loader, train
+from utils import load_data_transform, create_bs_train_loader, train, evaluate
+from networks import create_model, create_branching_network
 
 import sklearn
 import sklearn.model_selection
@@ -13,7 +16,6 @@ def estimate(X_train, y_train, args):
         Function to train model on input data.
     """
     N_BOOTSTRAP = args.bs_heads
-    CONFIDENCE_LEVEL = args.conf_level
     BATCH_SIZE = args.batch_size
     N_EPOCHS = args.n_epochs
     LEARNING_RATE = args.learning_rate
@@ -22,7 +24,7 @@ def estimate(X_train, y_train, args):
     DEVICE = args.device
 
     # Create model
-    model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP)
+    model = create_branching_network(MODEL_NAME, n_heads=N_BOOTSTRAP)
 
     # Preprocess images and labels
     data_transform = load_data_transform(train=True)
@@ -32,34 +34,47 @@ def estimate(X_train, y_train, args):
 
     # Train model
     print("Training model...")
-    train(model, bs_train_loader, run_name=RUN_NAME, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
-          confidence_level=CONFIDENCE_LEVEL, device=DEVICE)
+    results = train(model, bs_train_loader, run_name=RUN_NAME, n_epochs=N_EPOCHS, lr=LEARNING_RATE, device=DEVICE)
     print("Training completed.")
 
     return model
 
 
-def crossvalidate(X, y, groups, args):
+def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     """
         Function to cross-validate model on input data.
     """
-    N_BOOTSTRAP = args.bs_heads
+    N_HEADS = args.heads
     CONFIDENCE_LEVEL = args.conf_level
     BATCH_SIZE = args.batch_size
     N_EPOCHS = args.n_epochs
     LEARNING_RATE = args.learning_rate
     MODEL_NAME = args.model_name
+    MODEL_TYPE = args.model_type
+    USE_BOOTSTRAP = args.bootstrap
+    USE_SWAG = args.swag
     RUN_NAME = args.run_name
     DEVICE = args.device
     CV_FOLDS = args.cv_folds
+    NULL_HYPOTHESIS = args.null_hypothesis
 
     print("Run configuration:")
     for k, v in args.__dict__.items():
         print("{0}: {1}".format(k, v))
 
+    if X_test is not None and y_test is not None:
+        # Create test dataset
+        test_data_transform = load_data_transform(train=False)
+        test_dataset = CTImageDataSet(X_test, y_test, transform=test_data_transform)
+        test_loader = torch.utils.data.DataLoader(test_dataset,
+                                                   batch_size=1,
+                                                   shuffle=False,
+                                                   num_workers=0)
+
     # Create cross-validation splits
     group_kfold = sklearn.model_selection.GroupKFold(n_splits=CV_FOLDS)
     models = []
+    calibration_models = []
 
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
         print("Running fold %d..." % fold)
@@ -69,12 +84,18 @@ def crossvalidate(X, y, groups, args):
         print("Training samples: %d" % len(y_train))
         print("Validation samples: %d" % len(y_val))
 
-        # Create train datasets
+        # Create train dataset
         train_data_transform = load_data_transform(train=True)
         train_dataset = CTImageDataSet(X_train, y_train, transform=train_data_transform)
 
-        # Create bootstrap datasets
-        bs_train_loader = create_bs_train_loader(train_dataset, N_BOOTSTRAP, batch_size=BATCH_SIZE)
+        if USE_BOOTSTRAP:
+            # Create bootstrap dataset
+            train_loader = create_bs_train_loader(train_dataset, N_HEADS, batch_size=BATCH_SIZE)
+        else:
+            train_loader = [torch.utils.data.DataLoader(train_dataset,
+                                                   batch_size=BATCH_SIZE,
+                                                   shuffle=True,
+                                                   num_workers=0)]
 
         # Create validation datasets
         val_data_transform = load_data_transform(train=False)
@@ -83,58 +104,57 @@ def crossvalidate(X, y, groups, args):
                                                    batch_size=1,
                                                    shuffle=False,
                                                    num_workers=0)
+
+        if USE_SWAG:
+            bn_update_loader = torch.utils.data.DataLoader(train_dataset,
+                                                       batch_size=BATCH_SIZE,
+                                                       shuffle=False,
+                                                       num_workers=0)
+        else:
+            bn_update_loader = None
         # Create model
-        model = create_bs_network(MODEL_NAME, output_dim=N_BOOTSTRAP)
+        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, swag=USE_SWAG, bn_update_loader=bn_update_loader)
 
         # Train model
         print("Training model...")
-        train(model, bs_train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS,
-              lr=LEARNING_RATE, confidence_level=CONFIDENCE_LEVEL, val_loader=val_loader, device=DEVICE)
+        results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS,
+                        lr=LEARNING_RATE, swag=USE_SWAG, swag_lr=args.swag_learning_rate, swag_start=args.swag_start,
+                        swag_momentum=args.swag_momentum, null_hypothesis=NULL_HYPOTHESIS, confidence_level=CONFIDENCE_LEVEL,
+                        bootstrap=USE_BOOTSTRAP, val_loader=val_loader, test_loader=test_loader, device=DEVICE)
         print("Training completed.")
 
         models.append(model)
+        calibration_models.append(results['calibration_model'])
 
     print("Cross-validation completed.")
 
-    return models
+    return models, calibration_models
 
 
-def predict(X_test, model=None, std_threshold=0.0):
+def predict(X_test, y_test, args, model=None, calibration_model=None):
     # import torch
     # model = torch.load(model+'/Model.pth', map_location=torch.device('cpu'))
-
-    model.eval()
+    CONFIDENCE_LEVEL = args.conf_level
+    RUN_NAME = args.run_name
+    DEVICE = args.device
+    NULL_HYPOTHESIS = args.null_hypothesis
 
     # Preprocess images
     data_transform = load_data_transform(train=False)
-    test_dataset = CTImageDataSet(X_test, [0]*len(X_test), transform=data_transform)
+    test_dataset = CTImageDataSet(X_test, y_test, transform=data_transform)
     test_loader = torch.utils.data.DataLoader(test_dataset,
                                                batch_size=1,
                                                shuffle=False,
                                                num_workers=0)
 
-    y_pred = []
-    dydX = []
+    log_dir = os.path.join("./runs", RUN_NAME, "test")
+    writer = SummaryWriter(log_dir)
 
-    for data in test_loader:
-        images, dummy_targets = data
-        images.requires_grad = True
-        outputs = model(images)
-        input_grads = []
-        bs_heads = len(outputs[0])
-        for i in range(bs_heads):
-            input_grad = torch.autograd.grad(outputs[0][i], images, retain_graph=(i<bs_heads))[0]
-            input_grads.append(input_grad[0].mean(axis=0).numpy())  # Average across all RGB channels
-        dydX.append(np.stack(input_grads))
+    test_results = evaluate(model, test_loader, writer, 0, 0, 0,
+                            null_hypothesis=NULL_HYPOTHESIS,
+                            confidence_level=CONFIDENCE_LEVEL,
+                            calibration_model=calibration_model,
+                            tag='test',
+                            device=DEVICE)
 
-        # need to average multiple predictions of bootstrap net
-        mean_output = torch.sigmoid(outputs).data.mean(dim=-1)
-        std_output = torch.sigmoid(outputs).data.std(dim=-1)
-        predicted = (mean_output + std_threshold*std_output > 0.5).int()
-
-        if predicted == 1:
-            y_pred.append('COVID')
-        else:
-            y_pred.append('NonCOVID')
-
-    return y_pred, dydX
+    return test_results

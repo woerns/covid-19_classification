@@ -1,5 +1,6 @@
 import os
 import random
+import pickle
 
 import numpy as np
 import scipy as sp
@@ -11,6 +12,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 
+from networks import NetEnsemble
+from calibration import compute_uncertainty_reliability, fit_calibration_model
 from plots import plot_pred_reliability, plot_uncertainty_reliability
 
 
@@ -39,36 +42,6 @@ def load_data_transform(train=False, add_mask=False):
         ])
 
     return data_transform
-
-
-def create_bs_network(model_name,output_dim=10, add_mask=False):
-
-    if 'resnet' in model_name:
-        # ResNet Full
-        model = torch.hub.load('pytorch/vision:v0.6.0', model_name, pretrained=True)
-
-        if add_mask:
-            with torch.no_grad():
-                # Add additional input channel
-                weight = model.conv1.weight.detach().clone()
-                model.conv1 = torch.nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3,
-                                        bias=False)  # here 4 indicates 4-channel input
-                model.conv1.weight[:, :3] = weight
-                model.conv1.weight[:, 3] = model.conv1.weight[:, 2]
-
-        # Replace last layer
-        num_ftrs = model.fc.in_features
-        model.fc = torch.nn.Linear(num_ftrs, output_dim)
-    elif 'densenet' in model_name:
-        # DenseNet
-        model = torch.hub.load('pytorch/vision:v0.6.0', model_name, pretrained=True)
-        # Replace last layer
-        num_ftrs = model.classifier.in_features
-        model.classifier = torch.nn.Linear(num_ftrs, output_dim)
-    else:
-        raise ValueError("Unknown model name %s." % model_name)
-
-    return model
 
 
 def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
@@ -110,20 +83,129 @@ def compute_beta_quantile(pred_probs, confidence_level=0.95):
     return quantile, (alpha, beta)
 
 
-def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_level=None, val_loader=None, fold=None, device='cpu'):
-    # Null hypothesis for uncertainty-based decision rule. Can be either 'covid' or 'non-covid' (default).
-    NULL_HYPOTHESIS = 'non-covid'
+def evaluate(model, val_loader, writer, step_num, batch_num, epoch, null_hypothesis='non-covid',
+             confidence_level=None, calibration_model=None, tag='val', device='cpu'):
+    criterion_prob = torch.nn.BCELoss()
+    eval_results = {}
 
-    # push model to set device (CPU or GPU)
-    model.to(device)
+    total = correct = 0.0
+    val_loss = 0.0
+    class_probs = []
+    y_true = []
+    y_pred = []
+    quantiles = []
+    posterior_params = []
 
+    model.eval()
+
+    with torch.no_grad():
+        for data in val_loader:
+            images, labels = data
+            # NOTE: Current implementation only support batch size of 1.
+            assert images.size(0) == 1, "Evaluation batch size must be 1."
+            # push tensors to set device (CPU or GPU)
+            images, labels = images.to(device), labels.to(device)
+    
+            outputs = model(images)
+
+            pred_probs = torch.sigmoid(outputs).data
+            # need to average multiple predictions of all predictions
+            pred_probs = pred_probs.flatten()
+            mean_prob = pred_probs.mean(dim=-1).view(1)
+    
+            loss = criterion_prob(mean_prob, labels.float())
+            val_loss += loss.item()
+    
+            if confidence_level is not None:
+                # Uncertainty-based decision rule
+                if null_hypothesis == 'non-covid':
+                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(),
+                                                             confidence_level=confidence_level)
+                elif null_hypothesis == 'covid':
+                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(),
+                                                             confidence_level=1 - confidence_level)
+                else:
+                    raise ValueError('Null hypothesis must be either covid or non-covid.')
+    
+                if calibration_model is not None:
+                    # Calibrate quantile based on calibration model
+                    quantile = calibration_model.predict([quantile])
+    
+                predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
+                quantiles.append(quantile)
+                posterior_params.append(params)
+            else:
+                predicted = (mean_prob > 0.5).int()
+    
+            # Compute accuracy
+            total += labels.size(0)
+            correct += (predicted == labels.int()).sum().item()
+            acc = correct / total
+    
+            # Compute class probabilities
+            class_probs.append(mean_prob.cpu().numpy())
+            y_pred.append(predicted.cpu().numpy())
+            y_true.append(labels.cpu().numpy())
+
+    y_true = np.concatenate(y_true)
+    y_pred = np.concatenate(y_pred)
+    class_probs = np.concatenate(class_probs)
+
+    print('[%d, %3d] {}_loss: %.3f'.format(tag) %
+          (epoch + 1, batch_num + 1, val_loss / len(val_loader)))
+    print('[%d, %3d] {}_acc: %.1f %%'.format(tag) % (epoch + 1, batch_num + 1, 100 * acc))
+
+    # Write to tensorboard
+    writer.add_scalar('Loss/{}'.format(tag), val_loss / len(val_loader), step_num)
+    writer.add_scalar('Acc/{}'.format(tag), acc, step_num)
+    writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs), step_num)
+    writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred), step_num)
+
+    writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true, bins=10), step_num)
+    if confidence_level is not None:
+        writer.add_figure('Uncertainty reliability/{}'.format(tag),
+                          plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
+        if calibration_model is not None:
+            writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
+                          plot_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                       calibration_model=calibration_model, bins=10), step_num)
+        eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                                                  bins=10)
+    eval_results['y_pred'] = y_pred
+    eval_results['class_probs'] = class_probs
+    eval_results['y_true'] = y_true
+
+    writer.flush()
     model.train()
 
-    n_bootstrap = len(bs_train_loader)
-    steps_per_epoch = len(bs_train_loader[0])
+    return eval_results
+
+
+def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
+          bootstrap=False, fold=None, confidence_level=None, null_hypothesis=None,
+          val_loader=None, test_loader=None, device='cpu'):
+    if bootstrap:
+        assert isinstance(train_loader, list) and len(train_loader) > 0, \
+            "Must pass in list of bootstrapped train loaders when applying bootstrap."
+    else:
+        if not isinstance(train_loader, list):
+            train_loader = [train_loader]
+
+    n_datasets = len(train_loader)
+    steps_per_epoch = len(train_loader[0])
+
+    if isinstance(swag_start, float) and swag_start < 1:
+        swag_start_epoch = int(n_epochs*swag_start)
+    else:
+        swag_start_epoch = swag_start
+
+    results = {}
+    # push model to set device (CPU or GPU)
+    model.to(device)
+    model.train()
+
     criterion = torch.nn.BCEWithLogitsLoss()
-    criterion_prob = torch.nn.BCELoss()
-    # optimizer = torch.optim.SGD(model.parameters(), lr=0.002, momentum=0.9, weight_decay=0.0001)
+    swag_optimizer = torch.optim.SGD(model.parameters(), lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
@@ -133,20 +215,22 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_l
 
     writer = SummaryWriter(log_dir)
 
-    iterators = [iter(x) for x in bs_train_loader]
+    iterators = [iter(x) for x in train_loader]
+
+    global_step_num = 0
 
     for epoch in range(n_epochs):  # loop over the datasets multiple times
         running_loss = 0.0
 
         for i in range(steps_per_epoch):
-            k = random.randint(0, n_bootstrap - 1)
+            k = random.randint(0, n_datasets - 1)
 
             try:
                 # get the next item
                 inputs, labels = next(iterators[k])
             except StopIteration:
                 # restart if we reached the end of iterator
-                iterators[k] = iter(bs_train_loader[k])
+                iterators[k] = iter(train_loader[k])
                 inputs, labels = next(iterators[k])
 
             # push tensors to set device (CPU or GPU)
@@ -157,15 +241,39 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_l
             for param in model.parameters():
                 param.grad = None
 
-            # forward + backward + optimize
             outputs = model(inputs)
-            loss = criterion(outputs[:, [k]], labels.view((-1, 1)).float())
+            if outputs.dim() == 2:
+                # Add additional dimension of prediction for branching network
+                outputs.unsqueeze_(2)
+            if bootstrap:
+                # NOTE: Forward and back prop for bootstrap ensemble can be optimized.
+                #       Only need to compute it for the kth model.
+                loss = criterion(outputs[:, k, :], labels.view((-1, 1)).float())
+            else:
+                n_predictions = outputs.shape[1]
+                for j in range(n_predictions):
+                    if j == 0:
+                        loss = criterion(outputs[:, j, :], labels.view((-1, 1)).float())
+                    else:
+                        loss += criterion(outputs[:, j, :], labels.view((-1, 1)).float())
+                loss /= n_predictions
+
             loss.backward()
-            optimizer.step()
+
+            if swag and epoch + 1 >= swag_start_epoch:
+                swag_optimizer.step()
+                if bootstrap and isinstance(model, NetEnsemble):
+                    model.update_swag(k) # Only update SWAG params for kth model
+                else:
+                    model.update_swag() # Update SWAG params for all models
+            else:
+                optimizer.step()
+
+            global_step_num += 1
 
             # print statistics
             running_loss += loss.item()
-            writer.add_scalar('Loss/train', loss.float(), epoch * steps_per_epoch + i + 1)
+            writer.add_scalar('Loss/train', loss.float(), global_step_num)
 
             if i % 10 == 9:  # print every 10 mini-batches
                 print('[%d, %3d] train_loss: %.5f' %
@@ -174,81 +282,42 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_l
                 running_loss = 0.0
 
                 if val_loader is not None:
-                    model.eval()
-                    total = correct = 0.0
-                    val_loss = 0.0
-                    class_probs = []
-                    y_test = []
-                    y_pred = []
-                    quantiles = []
-                    posterior_params = []
+                    if swag and epoch + 1 >= swag_start_epoch:
+                        print("Sampling SWAG models...")
+                        model.sample()
+                    print("Evaluating model on validation data...")
+                    results['val'] = evaluate(model, val_loader, writer, global_step_num, i, epoch,
+                            null_hypothesis=null_hypothesis,
+                            confidence_level=confidence_level,
+                            tag='val',
+                            device=device)
 
-                    with torch.no_grad():
-                        for data in val_loader:
-                            images, labels = data
-                            # push tensors to set device (CPU or GPU)
-                            images, labels = images.to(device), labels.to(device)
+                    if 'uncertainty_calibration_data' in results['val']:
+                        print("Fitting calibration model...")
+                        calibration_model = fit_calibration_model(results['val']['uncertainty_calibration_data'])
+                    else:
+                        calibration_model = None
 
-                            outputs = model(images)
-                            pred_probs = torch.sigmoid(outputs).data
-                            # need to average multiple predictions of bootstrap net
-                            mean_prob = pred_probs.mean(dim=-1)
-
-                            loss = criterion_prob(mean_prob, labels.float())
-                            val_loss += loss.item()
-
-                            if confidence_level is not None:
-                                # Uncertainty-based decision rule
-                                if NULL_HYPOTHESIS == 'non-covid':
-                                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(), confidence_level=confidence_level)
-                                elif NULL_HYPOTHESIS == 'covid':
-                                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(), confidence_level=1-confidence_level)
-                                else:
-                                    raise ValueError('Null hypothesis must be either covid or non-covid.')
-
-                                predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
-                                quantiles.append(quantile)
-                                posterior_params.append(params)
-                            else:
-                                predicted = (mean_prob > 0.5).int()
-
-                            # print("mean_prob: %.2f" % mean_prob.numpy())
-                            # print("quantile: % .2f" % quantile)
-                            # print("y_true: %d" % labels.int().item())
-
-                            # Compute accuracy
-                            total += labels.size(0)
-                            correct += (predicted == labels.int()).sum().item()
-                            acc = correct / total
-
-                            # Compute class probabilities
-                            class_probs.append(mean_prob.cpu().numpy())
-                            y_pred.append(predicted.cpu().numpy())
-                            y_test.append(labels.cpu().numpy())
-
-                    y_test = np.concatenate(y_test)
-                    y_pred = np.concatenate(y_pred)
-                    class_probs = np.concatenate(class_probs)
-
-                    print('[%d, %3d] val_loss: %.3f' %
-                          (epoch + 1, i + 1, val_loss / len(val_loader)))
-                    print('[%d, %3d] val_acc: %.1f %%' % (epoch + 1, i + 1, 100 * acc))
-                    model.train()
-
-                    # Write to tensorboard
-                    writer.add_scalar('Loss/val', val_loss / len(val_loader), epoch * steps_per_epoch + i + 1)
-                    writer.add_scalar('Acc/val', acc, epoch * steps_per_epoch + i + 1)
-                    writer.add_scalar('AUC/val', sklearn.metrics.roc_auc_score(y_test, class_probs), epoch * steps_per_epoch + i + 1)
-                    writer.add_scalar('F1/val', sklearn.metrics.f1_score(y_test, y_pred), epoch * steps_per_epoch + i + 1)
-
-                    writer.add_figure('Prediction reliability/val', plot_pred_reliability(class_probs, y_test, bins=10), epoch * steps_per_epoch + i + 1)
-                    if confidence_level is not None:
-                        writer.add_figure('Uncertainty reliability/val',
-                                     plot_uncertainty_reliability(class_probs, posterior_params, y_test, bins=10),
-                                     epoch * steps_per_epoch + i + 1)
-                    writer.flush()
+                if test_loader is not None:
+                    print("Evaluating model on test data...")
+                    results['test'] = evaluate(model, test_loader, writer, global_step_num, i, epoch,
+                                               null_hypothesis=null_hypothesis,
+                                               confidence_level=confidence_level,
+                                               calibration_model=calibration_model,
+                                               tag='test',
+                                               device=device)
 
         scheduler.step()
+
+    print("Saving calibration model...")
+    model_save_dir = "./models"
+    if not os.path.isdir(model_save_dir):
+        os.mkdir(model_save_dir)
+    model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
+    with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
+        pickle.dump(calibration_model, file)
+
+    results['calibration_model'] = calibration_model
 
     writer.close()
 
@@ -263,3 +332,5 @@ def train(model, bs_train_loader, run_name, n_epochs=10, lr=0.0001, confidence_l
         model_file_name = run_name + '.pth'
     torch.save(model, os.path.join(model_save_dir, model_file_name))
     print("Done.")
+
+    return results

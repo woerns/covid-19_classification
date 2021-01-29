@@ -24,14 +24,21 @@ def run_cv():
     # Model parameters
     parser.add_argument('-r', '--run_name', type=str, default='')
     parser.add_argument('-m', '--model_name', default='densenet169')
-    parser.add_argument('--bs_heads', type=int, default=10)
-    parser.add_argument('--conf_level', type=float, default=0.95)
+    parser.add_argument('-t', '--model_type', choices=['branching', 'ensemble'], default='branching')
+    parser.add_argument('--heads', type=int, default=10)
+    parser.add_argument('--conf_level', type=float, default=0.0)
+    parser.add_argument('-nh', '--null_hypothesis', choices=['non-covid', 'covid'], default='non-covid')
+    parser.add_argument('--swag', action='store_true', default=False)
 
     # Training parameters
-    parser.add_argument('--n_epochs', type=int, default=30)
+    parser.add_argument('--n_epochs', type=int, default=10)
     parser.add_argument('-bs', '--batch_size', type=int, default=32)
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.0001)
+    parser.add_argument('-swag_lr', '--swag_learning_rate', type=float, default=0.0001)
+    parser.add_argument('--swag_momentum', type=float, default=0.9)
+    parser.add_argument('--swag_start', type=float, default=0.8)
     parser.add_argument('--cv_folds', type=int, default=5)
+    parser.add_argument('--bootstrap', action='store_true', default=False)
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='ucsd-ai4h')
@@ -47,13 +54,19 @@ def run_cv():
 
     # Process input arguments
     args = parser.parse_args()
-    if args.bs_heads == 1:
+    if args.heads == 1:
         args.conf_level = 0.0
     if args.run_name == '':
         args.run_name = "_".join([args.model_name,
-                             "bs{0:d}".format(args.bs_heads),
-                             "cl{0:.2f}".format(args.conf_level),
-                             datetime.datetime.now().strftime("%Y%m%d-%H%M")])
+                                "{0}{1:d}".format(args.model_type, args.heads)])
+        if args.swag:
+            args.run_name += "_swag"
+        if args.bootstrap:
+            args.run_name += "_bs"
+        args.run_name = "_".join([args.run_name,
+                                "cl{0:.2f}".format(args.conf_level),
+                                datetime.datetime.now().strftime("%Y%m%d-%H%M")])
+
     if args.conf_level == 0.0:
         args.conf_level = None
 
@@ -62,11 +75,13 @@ def run_cv():
     # Set seeds
     place_seeds(args.seed)
 
-    # Load data
-    X, y, groups = load_dataset(args.dataset, args.data_root_dir)
+    # Load training and validation data
+    X, y, groups = load_dataset(args.dataset, args.data_root_dir, dataset_version='full')
+    # Load test data
+    X_test, y_test, _ = load_dataset(args.dataset, args.data_root_dir, dataset_version='test')
 
     # Cross-validate model
-    models = crossvalidate(X, y, groups, args)
+    cv_models, calibration_models = crossvalidate(X, y, groups, args, X_test=X_test, y_test=y_test)
 
     time_elapsed = time.time() - start
     print(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
