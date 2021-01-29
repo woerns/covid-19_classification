@@ -90,7 +90,6 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     class_probs = []
     y_true = []
     y_pred = []
-    quantiles = []
     posterior_params = []
 
     model.eval()
@@ -113,32 +112,36 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
             loss = criterion_prob(mean_prob, labels.float())
             avg_loss += loss.item()
 
-            alpha, beta = fit_beta_distribution(pred_probs.cpu().numpy())
+            n_predictions = pred_probs.size(0)
+            if n_predictions > 1:
+                alpha, beta = fit_beta_distribution(pred_probs.cpu().numpy())
 
-            if confidence_level is not None:
-                # Uncertainty-based decision rule
-                if null_hypothesis == 'non-covid':
-                    quantile = sp.stats.beta.ppf(confidence_level, alpha, beta)
-                elif null_hypothesis == 'covid':
-                    quantile = sp.stats.beta.ppf(1. - confidence_level, alpha, beta)
+                if confidence_level is not None:
+                    # Uncertainty-based decision rule
+                    if null_hypothesis == 'non-covid':
+                        quantile = sp.stats.beta.ppf(confidence_level, alpha, beta)
+                    elif null_hypothesis == 'covid':
+                        quantile = sp.stats.beta.ppf(1. - confidence_level, alpha, beta)
+                    else:
+                        raise ValueError('Null hypothesis must be either covid or non-covid.')
+
+                    if calibration_model is not None:
+                        # Calibrate quantile based on calibration model
+                        quantile = calibration_model.predict([quantile])
+
+                    predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
                 else:
-                    raise ValueError('Null hypothesis must be either covid or non-covid.')
-    
-                if calibration_model is not None:
-                    # Calibrate quantile based on calibration model
-                    quantile = calibration_model.predict([quantile])
-    
-                predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
-                quantiles.append(quantile)
+                    predicted = (mean_prob > 0.5).int()
+
+                posterior_params.append((alpha, beta))
             else:
                 predicted = (mean_prob > 0.5).int()
-    
+
             # Compute accuracy
             total += labels.size(0)
             correct += (predicted == labels.int()).sum().item()
             acc = correct / total
 
-            posterior_params.append((alpha, beta))
             class_probs.append(mean_prob.cpu().numpy())
             y_pred.append(predicted.cpu().numpy())
             y_true.append(labels.cpu().numpy())
@@ -159,13 +162,14 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per_bin=5), step_num)
 
     writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true, bins=10), step_num)
-    writer.add_figure('Uncertainty reliability/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
-    if calibration_model is not None:
-        writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
-                      plot_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                   calibration_model=calibration_model, bins=10), step_num)
+    if posterior_params:
+        writer.add_figure('Uncertainty reliability/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
+        if calibration_model is not None:
+            writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
+                          plot_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                       calibration_model=calibration_model, bins=10), step_num)
 
-    eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
+        eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
                                                                               bins=10)
     eval_results['y_pred'] = y_pred
     eval_results['class_probs'] = class_probs
