@@ -4,6 +4,7 @@ from collections import deque
 import numpy as np
 import torch
 
+
 class SWAG(torch.nn.Module):
     def __init__(self, base_model, n_rank=10, n_samples=10, bn_update_loader=None):
         super(SWAG, self).__init__()
@@ -34,7 +35,6 @@ class SWAG(torch.nn.Module):
         param_cov_diag = np.clip(param_cov_diag, self.min_var, None)
         params = self.param_mean + 1. / np.sqrt(2) * np.sqrt(param_cov_diag) * z1 + \
                  1. / np.sqrt(2 * (self.n_rank - 1)) * np.dot(np.array(self.param_buffer).T, z2)
-        # params = self.param_mean
 
         return params
 

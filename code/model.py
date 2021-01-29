@@ -113,7 +113,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         else:
             bn_update_loader = None
         # Create model
-        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, swag=USE_SWAG, bn_update_loader=bn_update_loader)
+        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, swag=USE_SWAG, swag_rank=args.swag_rank,
+                             swag_samples=args.swag_samples, bn_update_loader=bn_update_loader)
 
         # Train model
         print("Training model...")

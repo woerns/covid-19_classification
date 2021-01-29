@@ -36,6 +36,8 @@ def run_cv():
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.0001)
     parser.add_argument('-swag_lr', '--swag_learning_rate', type=float, default=0.0001)
     parser.add_argument('--swag_momentum', type=float, default=0.9)
+    parser.add_argument('--swag_rank', type=int, default=10)
+    parser.add_argument('--swag_samples', type=int, default=10)
     parser.add_argument('--swag_start', type=float, default=0.8)
     parser.add_argument('--cv_folds', type=int, default=5)
     parser.add_argument('--bootstrap', action='store_true', default=False)

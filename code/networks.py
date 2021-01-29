@@ -63,18 +63,18 @@ def create_branching_network(model_name, n_heads=10, add_mask=False):
     return model
 
 
-def create_model(model_name, model_type, n_heads, swag=False, bn_update_loader=None):
+def create_model(model_name, model_type, n_heads, swag=False, swag_rank=10, swag_samples=10, bn_update_loader=None):
     if swag:
         assert bn_update_loader is not None, "Must provide training data loader for BN update when applying SWAG."
 
     if model_type == 'branching':
         model = create_branching_network(model_name, n_heads=n_heads)
         if swag:
-            model = SWAG(model, bn_update_loader=bn_update_loader)
+            model = SWAG(model, n_rank=swag_rank, n_samples=swag_samples, bn_update_loader=bn_update_loader)
     elif model_type == 'ensemble':
         models = [create_branching_network(model_name, n_heads=1) for _ in range(n_heads)]
         if swag:
-            models = [SWAG(x, bn_update_loader=bn_update_loader) for x in models]
+            models = [SWAG(x, n_rank=swag_rank, n_samples=swag_samples, bn_update_loader=bn_update_loader) for x in models]
         model = NetEnsemble(models)
     else:
         raise ValueError("Unknown model type %s." % model_type)
