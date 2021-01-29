@@ -21,18 +21,18 @@ def plot_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
 
 
 def plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
-    exp_probs, obs_probs = compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=calibration_model,
+    exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=calibration_model,
                                                            bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     fig = plt.figure()
-    plt.plot(exp_probs, obs_probs, color='C1', marker='.', markersize=8)
+    plt.plot(exp_cdf, obs_cdf, color='C1', marker='.', markersize=8)
     plt.axline([0, 0], [1, 1], color='k', ls='--')
     plt.xlim([0., 1.])
     plt.ylim([0., 1.])
     plt.grid()
     plt.title('P-P plot')
-    plt.xlabel('Empirical cdf')
-    plt.ylabel('Fitted theoretical cdf')
+    plt.xlabel('Expected cdf')
+    plt.ylabel('Observed cdf')
     plt.close()
 
     return fig

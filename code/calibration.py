@@ -57,20 +57,36 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calib
     N = len(class_probs)
     bin_centers, _, _, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
-    cum_probs = np.zeros_like(class_probs)
+    obs_probs = np.zeros_like(class_probs)
     for i in range(N):
         b = np.abs(class_probs[i] - bin_centers).argmin()
         alpha, beta = posterior_params[i]
-        cum_probs[i] = sp.stats.beta.cdf(acc[b], alpha, beta)
+        obs_probs[i] = sp.stats.beta.cdf(acc[b], alpha, beta)
         if calibration_model is not None:
-            if not np.isnan(cum_probs[i]):
-                cum_probs[i] = calibration_model.predict([cum_probs[i]])[0]
+            if not np.isnan(obs_probs[i]):
+                obs_probs[i] = calibration_model.predict([obs_probs[i]])[0]
 
-    exp_probs = np.linspace(0.0, 1.0, N + 1)
-    cum_probs = cum_probs[~np.isnan(cum_probs)] # Remove NaNs
-    obs_probs = np.array([(cum_probs <= x).sum() / len(cum_probs) for x in exp_probs])
+    exp_cdf = np.linspace(0.0, 1.0, N + 1)
+    obs_probs = obs_probs[~np.isnan(obs_probs)] # Remove NaNs
+    obs_cdf = np.array([(obs_probs <= x).sum() / len(obs_probs) for x in exp_cdf])
 
-    return exp_probs, obs_probs
+    return exp_cdf, obs_cdf
+
+
+def compute_wasserstein_dist(cdf_x, cdf_y):
+    """Computes Wasserstein distance for two given CDFs."""
+    bin_edges = np.concatenate(([0.0], 0.5*(cdf_x[:-1] + cdf_x[1:]), [1.0]), axis=0)
+    dx = (bin_edges[1:] - bin_edges[:-1])
+    wasserstein_dist = (np.abs(cdf_x-cdf_y) * dx).sum()
+
+    return wasserstein_dist
+
+
+def compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
+    exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                           calibration_model=calibration_model,
+                                                           bins=bins, min_obs_per_bin=min_obs_per_bin)
+    return compute_wasserstein_dist(exp_cdf, obs_cdf)
 
 
 def fit_calibration_model(calibration_data):

@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 
 from networks import NetEnsemble
-from calibration import compute_expected_calibration_error, compute_uncertainty_reliability, fit_calibration_model
+from calibration import compute_expected_calibration_error, compute_uncertainty_reliability, compute_posterior_wasserstein_dist, fit_calibration_model
 from plots import plot_pred_reliability, plot_uncertainty_reliability
 
 
@@ -160,14 +160,18 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs), step_num)
     writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred), step_num)
     writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per_bin=5), step_num)
-
     writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true, bins=10), step_num)
+
     if posterior_params:
+        writer.add_scalar('Wasserstein dist/{}'.format(tag), compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, bins=10), step_num)
         writer.add_figure('Uncertainty reliability/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
         if calibration_model is not None:
+            writer.add_scalar('Wasserstein dist (calibrated)/{}'.format(tag),
+                              compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true,
+                                                                 calibration_model=calibration_model, bins=10), step_num)
             writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
-                          plot_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                       calibration_model=calibration_model, bins=10), step_num)
+                                plot_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                                calibration_model=calibration_model, bins=10), step_num)
 
         eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
                                                                               bins=10)
