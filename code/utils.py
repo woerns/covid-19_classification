@@ -266,9 +266,10 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag
                     model.update_swag(k) # Only update SWAG params for kth model
                 else:
                     model.update_swag() # Update SWAG params for all models
+                writer.add_scalar('Learning rate/swag', swag_optimizer.param_groups[0]['lr'], global_step_num)
             else:
                 optimizer.step()
-
+                writer.add_scalar('Learning rate/main', optimizer.param_groups[0]['lr'], global_step_num)
             global_step_num += 1
 
             # print statistics
