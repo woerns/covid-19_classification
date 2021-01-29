@@ -284,7 +284,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
 
         if epoch % eval_interval == 0:
             if val_loader is not None:
-                if swag and epoch + 1 >= swag_start_epoch:
+                if swag and epoch >= swag_start_epoch:
                     print("Sampling SWAG models...")
                     model.sample()
                 print("Evaluating model on validation data...")
