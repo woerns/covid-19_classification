@@ -69,18 +69,15 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     return bs_train_loader
 
 
-def compute_beta_quantile(pred_probs, confidence_level=0.95):
+def fit_beta_distribution(pred_probs):
     # Fit beta distribution using method-of-moments
-    # and compute quantile of given probability
     mean = pred_probs.mean()
     var = pred_probs.var()
     v = (mean*(1-mean)/var-1.0)
     alpha = mean*v
     beta = (1-mean)*v
 
-    quantile = sp.stats.beta.ppf(confidence_level, alpha, beta)
-
-    return quantile, (alpha, beta)
+    return alpha, beta
 
 
 def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-covid',
@@ -115,15 +112,15 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     
             loss = criterion_prob(mean_prob, labels.float())
             avg_loss += loss.item()
-    
+
+            alpha, beta = fit_beta_distribution(pred_probs.cpu().numpy())
+
             if confidence_level is not None:
                 # Uncertainty-based decision rule
                 if null_hypothesis == 'non-covid':
-                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(),
-                                                             confidence_level=confidence_level)
+                    quantile = sp.stats.beta.ppf(confidence_level, alpha, beta)
                 elif null_hypothesis == 'covid':
-                    quantile, params = compute_beta_quantile(pred_probs.cpu().numpy(),
-                                                             confidence_level=1 - confidence_level)
+                    quantile = sp.stats.beta.ppf(1. - confidence_level, alpha, beta)
                 else:
                     raise ValueError('Null hypothesis must be either covid or non-covid.')
     
@@ -133,7 +130,6 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     
                 predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
                 quantiles.append(quantile)
-                posterior_params.append(params)
             else:
                 predicted = (mean_prob > 0.5).int()
     
@@ -141,8 +137,8 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
             total += labels.size(0)
             correct += (predicted == labels.int()).sum().item()
             acc = correct / total
-    
-            # Compute class probabilities
+
+            posterior_params.append((alpha, beta))
             class_probs.append(mean_prob.cpu().numpy())
             y_pred.append(predicted.cpu().numpy())
             y_true.append(labels.cpu().numpy())
@@ -163,16 +159,14 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per_bin=5), step_num)
 
     writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true, bins=10), step_num)
-    if confidence_level is not None:
-        writer.add_figure('Uncertainty reliability/{}'.format(tag),
-                          plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
-        if calibration_model is not None:
-            writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
-                          plot_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                       calibration_model=calibration_model, bins=10), step_num)
-        eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                                                  bins=10)
+    writer.add_figure('Uncertainty reliability/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
+    if calibration_model is not None:
+        writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
+                      plot_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                   calibration_model=calibration_model, bins=10), step_num)
 
+    eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                                              bins=10)
     eval_results['y_pred'] = y_pred
     eval_results['class_probs'] = class_probs
     eval_results['y_true'] = y_true
