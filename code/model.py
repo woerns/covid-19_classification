@@ -123,8 +123,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         # Train model
         print("Training model...")
         results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
-                        swag=USE_SWAG, swag_lr=args.swag_learning_rate, swag_start=args.swag_start,
-                        swag_momentum=args.swag_momentum, null_hypothesis=NULL_HYPOTHESIS,
+                        lr_hl=args.lr_halflife, swag=USE_SWAG, swag_lr=args.swag_learning_rate,
+                        swag_start=args.swag_start, swag_momentum=args.swag_momentum, null_hypothesis=NULL_HYPOTHESIS,
                         confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
                         val_loader=val_loader, test_loader=test_loader, eval_interval=args.eval_interval, device=DEVICE)
         print("Training completed.")

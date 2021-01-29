@@ -34,6 +34,7 @@ def run_cv():
     parser.add_argument('--n_epochs', type=int, default=10)
     parser.add_argument('-bs', '--batch_size', type=int, default=32)
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.0001)
+    parser.add_argument('--lr_halflife', type=int, default=5)   # halve learning rate every x epochs
     parser.add_argument('-swag_lr', '--swag_learning_rate', type=float, default=0.0001)
     parser.add_argument('--swag_momentum', type=float, default=0.9)
     parser.add_argument('--swag_rank', type=int, default=10)

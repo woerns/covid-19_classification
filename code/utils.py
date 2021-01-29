@@ -177,7 +177,7 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     return eval_results
 
 
-def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
+def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
           bootstrap=False, fold=None, confidence_level=None, null_hypothesis=None,
           val_loader=None, test_loader=None, eval_interval=5, device='cpu'):
     if bootstrap:
@@ -201,9 +201,10 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, swag=True, swag
     model.train()
 
     criterion = torch.nn.BCEWithLogitsLoss()
-    swag_optimizer = torch.optim.SGD(model.parameters(), lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
+    if swag:
+        swag_optimizer = torch.optim.SGD(model.parameters(), lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_hl, gamma=0.5)
 
     log_dir = os.path.join("./runs", run_name)
     if fold is not None:
