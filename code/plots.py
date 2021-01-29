@@ -3,7 +3,7 @@ from calibration import compute_pred_reliability, compute_uncertainty_reliabilit
 
 
 def plot_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
-    bin_centers, confidence, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
+    bin_centers, _, confidence, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     y = confidence - acc
     fig = plt.figure()

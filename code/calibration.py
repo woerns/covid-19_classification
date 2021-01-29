@@ -40,7 +40,15 @@ def compute_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
 
             confidence[b] = confidence[b] / count[b]
 
-    return bin_centers, confidence, acc
+    return bin_centers, count, confidence, acc
+
+
+def compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per_bin=5):
+    _, count, confidence, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
+
+    ece = np.nansum(np.abs(confidence - acc)*count)/count.sum()
+
+    return ece
 
 
 def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
