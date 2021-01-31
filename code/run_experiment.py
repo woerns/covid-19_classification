@@ -64,7 +64,7 @@ def run_cv():
         args.run_name = "_".join([args.model_name,
                                 "{0}{1:d}".format(args.model_type, args.heads)])
         if args.swag:
-            args.run_name += "_swag"
+            args.run_name += "_swag{0:d}".format(args.swag_samples)
         if args.bootstrap:
             args.run_name += "_bs"
         args.run_name = "_".join([args.run_name,
