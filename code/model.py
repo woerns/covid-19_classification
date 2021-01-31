@@ -63,7 +63,10 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     for k, v in args.__dict__.items():
         print("{0}: {1}".format(k, v))
 
-    with open(os.path.join('./models', RUN_NAME + '.txt'), 'w') as f:
+    model_save_dir = os.path.join("./models", RUN_NAME)
+    if not os.path.exists(model_save_dir):
+        os.makedirs(model_save_dir)
+    with open(os.path.join(model_save_dir, RUN_NAME + '.txt'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
     if X_test is not None and y_test is not None:

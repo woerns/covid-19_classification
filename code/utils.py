@@ -155,6 +155,7 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     print('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
 
     # Write to tensorboard
+    writer.add_scalar('Epoch/{}'.format(tag), epoch, step_num)
     writer.add_scalar('Loss/{}'.format(tag), avg_loss, step_num)
     writer.add_scalar('Acc/{}'.format(tag), acc, step_num)
     writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs), step_num)
@@ -286,9 +287,9 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
 
                 writer.add_scalar('Loss/train', loss.float(), global_step_num)
                 if swag and epoch >= swag_start_epoch:
-                    writer.add_scalar('Learning rate/swag', swag_optimizer.param_groups[0]['lr'], global_step_num)
+                    writer.add_scalar('Learning rate/swag/train', swag_optimizer.param_groups[0]['lr'], global_step_num)
                 else:
-                    writer.add_scalar('Learning rate/main', optimizer.param_groups[0]['lr'], global_step_num)
+                    writer.add_scalar('Learning rate/main/train', optimizer.param_groups[0]['lr'], global_step_num)
 
         if epoch % eval_interval == 0:
             if val_loader is not None:
@@ -308,6 +309,8 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                 else:
                     calibration_model = None
 
+                results['calibration_model'] = calibration_model
+
             if test_loader is not None:
                 print("Evaluating model on test data...")
                 results['test'] = evaluate(model, test_loader, writer, global_step_num, epoch,
@@ -319,23 +322,19 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
 
         scheduler.step()
 
+    writer.close()
+
+    # Save models
+    model_save_dir = os.path.join("./models", run_name)
+    if not os.path.exists(model_save_dir):
+        os.makedirs(model_save_dir)
+
     print("Saving calibration model...")
-    model_save_dir = "./models"
-    if not os.path.isdir(model_save_dir):
-        os.mkdir(model_save_dir)
     model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
     with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
         pickle.dump(calibration_model, file)
 
-    results['calibration_model'] = calibration_model
-
-    writer.close()
-
-    # Save model
     print("Saving model...")
-    model_save_dir = "./models"
-    if not os.path.isdir(model_save_dir):
-        os.mkdir(model_save_dir)
     if fold is not None:
         model_file_name = run_name + "_fold{}.pth".format(fold)
     else:
