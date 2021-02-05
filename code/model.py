@@ -58,15 +58,16 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     DEVICE = args.device
     CV_FOLDS = args.cv_folds
     NULL_HYPOTHESIS = args.null_hypothesis
+    LOG_DIR = os.path.join("./runs", args.run_name, "seed{0}".format(args.seed))
+    MODEL_SAVE_DIR = os.path.join("./models", args.run_name, "seed{0}".format(args.seed))
 
     print("Run configuration:")
     for k, v in args.__dict__.items():
         print("{0}: {1}".format(k, v))
 
-    model_save_dir = os.path.join("./models", RUN_NAME)
-    if not os.path.exists(model_save_dir):
-        os.makedirs(model_save_dir)
-    with open(os.path.join(model_save_dir, RUN_NAME + '.txt'), 'w') as f:
+    if not os.path.exists(MODEL_SAVE_DIR):
+        os.makedirs(MODEL_SAVE_DIR)
+    with open(os.path.join(MODEL_SAVE_DIR, RUN_NAME + '.txt'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
     if X_test is not None and y_test is not None:
@@ -129,7 +130,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
                         lr_hl=args.lr_halflife, swag=USE_SWAG, swag_lr=args.swag_learning_rate,
                         swag_start=args.swag_start, swag_momentum=args.swag_momentum, null_hypothesis=NULL_HYPOTHESIS,
                         confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
-                        val_loader=val_loader, test_loader=test_loader, eval_interval=args.eval_interval, device=DEVICE)
+                        val_loader=val_loader, test_loader=test_loader, eval_interval=args.eval_interval,
+                        log_dir=LOG_DIR, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
         print("Training completed.")
 
         models.append(model)

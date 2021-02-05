@@ -54,7 +54,7 @@ def run_cv():
 
     # Others
     parser.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
-    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--seed', nargs='+', type=int, default=[42, 22, 719662, 945304, 139494, 386078, 307341, 328977, 323004, 795956])
 
     # Process input arguments
     args = parser.parse_args()
@@ -70,25 +70,28 @@ def run_cv():
         args.run_name = "_".join([args.run_name,
                                 "cl{0:.2f}".format(args.conf_level),
                                 datetime.datetime.now().strftime("%Y%m%d-%H%M")])
-
     if args.conf_level == 0.0:
         args.conf_level = None
 
-    start = time.time()
-
-    # Set seeds
-    place_seeds(args.seed)
-
+    seed_list = args.seed
     # Load training and validation data
     X, y, groups = load_dataset(args.dataset, args.data_root_dir, dataset_version='full')
     # Load test data
     X_test, y_test, _ = load_dataset(args.dataset, args.data_root_dir, dataset_version='test')
 
-    # Cross-validate model
-    cv_models, calibration_models = crossvalidate(X, y, groups, args, X_test=X_test, y_test=y_test)
+    start = time.time()
+    for seed in seed_list:
+        # Set seeds
+        args.seed = seed
+        place_seeds(args.seed)
+        print("Running experiment with seed %d..." % args.seed)
+        # Cross-validate model
+        cv_models, calibration_models = crossvalidate(X, y, groups, args, X_test=X_test, y_test=y_test)
 
     time_elapsed = time.time() - start
     print(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
+    print("Done.")
+
 
     print("done")
 

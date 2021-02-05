@@ -188,7 +188,7 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
 
 def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
           bootstrap=False, fold=None, confidence_level=None, null_hypothesis=None,
-          val_loader=None, test_loader=None, eval_interval=5, device='cpu'):
+          val_loader=None, test_loader=None, eval_interval=5, log_dir=None, model_save_dir=None, device='cpu'):
     if bootstrap:
         assert isinstance(train_loader, list) and len(train_loader) > 0, \
             "Must pass in list of bootstrapped train loaders when applying bootstrap."
@@ -215,7 +215,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_hl, gamma=0.5)
 
-    log_dir = os.path.join("./runs", run_name)
     if fold is not None:
         log_dir = os.path.join(log_dir, "fold{0:d}".format(fold))
 
@@ -325,7 +324,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
     writer.close()
 
     # Save models
-    model_save_dir = os.path.join("./models", run_name)
     if not os.path.exists(model_save_dir):
         os.makedirs(model_save_dir)
 
