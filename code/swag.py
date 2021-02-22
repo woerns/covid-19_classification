@@ -130,7 +130,6 @@ class SWAG(torch.nn.Module):
 
             self.sampled_models.append(model)
 
-
     def forward(self, x):
         if self.training:
             return self.base_model(x)
@@ -138,10 +137,11 @@ class SWAG(torch.nn.Module):
             if self.sampled_models:
                 sampled_outputs = [None] * self.n_samples
 
-                for i in range(self.n_samples):
-                    # Sample from Gaussian posterior
-                    model = self.sampled_models[i]
-                    sampled_outputs[i] = model(x)
+                with torch.no_grad():
+                    for i in range(self.n_samples):
+                        # Sample from Gaussian posterior
+                        model = self.sampled_models[i]
+                        sampled_outputs[i] = model(x)
                 # Assuming outputs have shape (B, K) and second dimension contains K scalar predictions
                 sampled_outputs = torch.cat(sampled_outputs, dim=1)
 
