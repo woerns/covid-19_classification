@@ -33,8 +33,16 @@ class SWAG(torch.nn.Module):
         z2 = np.random.normal(size=(len(self.param_buffer),))
         param_cov_diag = self.param_second_mom - self.param_mean ** 2
         param_cov_diag = np.clip(param_cov_diag, self.min_var, None)
-        params = self.param_mean + 1. / np.sqrt(2) * np.sqrt(param_cov_diag) * z1 + \
-                 1. / np.sqrt(2 * (self.n_rank - 1)) * np.dot(np.array(self.param_buffer).T, z2)
+        # NOTE: Different from Maddox et. al. (https://arxiv.org/abs/1902.02476)
+        # Subtracting current mean rather than running mean.
+        deviations_matrix = np.array(self.param_buffer) - self.param_mean
+        sampled_deviations = (1. / np.sqrt(2) * np.sqrt(param_cov_diag) * z1 +
+                              1. / np.sqrt(2 * (self.n_rank - 1)) * np.dot(deviations_matrix.T, z2))
+
+        if self.sample_mask is not None:
+            sampled_deviations *= self.sample_mask
+
+        params = self.param_mean + sampled_deviations
 
         return params
 
