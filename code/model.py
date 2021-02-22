@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from data import CTImageDataSet
 from utils import load_data_transform, create_bs_train_loader, train, evaluate
-from networks import create_model, create_branching_network
+from networks import create_model, create_branching_network, get_swag_branchout_layers
 
 import sklearn
 import sklearn.model_selection
@@ -118,8 +118,14 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
                                                        batch_size=BATCH_SIZE,
                                                        shuffle=False,
                                                        num_workers=0)
+            if args.branchout:
+                swag_branchout_layers = get_swag_branchout_layers(MODEL_NAME)
+            else:
+                swag_branchout_layers = None
         else:
             bn_update_loader = None
+            swag_branchout_layers = None
+
         # Create model
         model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, swag=USE_SWAG, swag_rank=args.swag_rank,
                              swag_samples=args.swag_samples, bn_update_loader=bn_update_loader)
@@ -128,8 +134,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         print("Training model...")
         results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
                         lr_hl=args.lr_halflife, swag=USE_SWAG, swag_lr=args.swag_learning_rate,
-                        swag_start=args.swag_start, swag_momentum=args.swag_momentum, null_hypothesis=NULL_HYPOTHESIS,
-                        confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
+                        swag_start=args.swag_start, swag_momentum=args.swag_momentum, swag_branchout_layers=swag_branchout_layers,
+                        null_hypothesis=NULL_HYPOTHESIS, confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
                         val_loader=val_loader, test_loader=test_loader, eval_interval=args.eval_interval,
                         log_dir=LOG_DIR, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
         print("Training completed.")

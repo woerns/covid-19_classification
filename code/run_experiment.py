@@ -29,6 +29,7 @@ def run_cv():
     parser.add_argument('--conf_level', type=float, default=0.0)
     parser.add_argument('-nh', '--null_hypothesis', choices=['non-covid', 'covid'], default='non-covid')
     parser.add_argument('--swag', action='store_true', default=False)
+    parser.add_argument('--branchout', action='store_true', default=False)
 
     # Training parameters
     parser.add_argument('--n_epochs', type=int, default=10)

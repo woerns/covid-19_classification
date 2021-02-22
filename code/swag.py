@@ -6,7 +6,8 @@ import torch
 
 
 class SWAG(torch.nn.Module):
-    def __init__(self, base_model, n_rank=10, n_samples=10, bn_update_loader=None):
+    def __init__(self, base_model, n_rank=10, n_samples=10, bn_update_loader=None, sample_mask=None):
+
         super(SWAG, self).__init__()
         self.base_model = base_model
         self.n_rank = n_rank
@@ -17,6 +18,7 @@ class SWAG(torch.nn.Module):
         self.param_second_mom = None
         self.param_buffer = deque()
         self.bn_update_loader = bn_update_loader
+        self.sample_mask = sample_mask
         self.sampled_models = torch.nn.ModuleList()
         self.min_var = 1e-30
 

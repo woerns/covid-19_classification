@@ -34,7 +34,6 @@ class NetEnsemble(torch.nn.Module):
 
 
 def create_branching_network(model_name, n_heads=10, add_mask=False):
-
     if 'resnet' in model_name:
         # ResNet Full
         model = torch.hub.load('pytorch/vision:v0.6.0', model_name, pretrained=True)
@@ -61,6 +60,20 @@ def create_branching_network(model_name, n_heads=10, add_mask=False):
         raise ValueError("Unknown model name %s." % model_name)
 
     return model
+
+
+def get_swag_branchout_layers(model_name):
+    if model_name == 'densenet169':
+        branchout_layers = ['features.conv0',
+                            'features.denseblock1',
+                            'features.denseblock2',
+                            'features.denseblock3',
+                            'features.denseblock4',
+                            'classifier']
+    else:
+        raise ValueError("Unknown model name %s." % model_name)
+
+    return branchout_layers
 
 
 def create_model(model_name, model_type, n_heads, swag=False, swag_rank=10, swag_samples=10, bn_update_loader=None):

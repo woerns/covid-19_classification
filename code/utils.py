@@ -44,6 +44,22 @@ def load_data_transform(train=False, add_mask=False):
     return data_transform
 
 
+def create_sample_mask(model, branchout_layer_name):
+    state_dict = model.state_dict()
+    param_masks = []
+    branch = False
+
+    for param_name, _ in model.named_parameters():
+        n = state_dict[param_name].numel()
+        if branchout_layer_name in param_name:
+            branch = True
+        param_masks.append(np.zeros((n,)) + float(branch))
+
+    sample_mask = np.concatenate(param_masks, axis=0)
+
+    return sample_mask
+
+
 def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     bs_train_loader = []
     train_idx = list(range(len(dataset)))
@@ -186,7 +202,7 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     return eval_results
 
 
-def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
+def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9, swag_branchout_layers=None,
           bootstrap=False, fold=None, confidence_level=None, null_hypothesis=None,
           val_loader=None, test_loader=None, eval_interval=5, log_dir=None, model_save_dir=None, device='cpu'):
     if bootstrap:
@@ -291,33 +307,74 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                     writer.add_scalar('Learning rate/main/train', optimizer.param_groups[0]['lr'], global_step_num)
 
         if epoch % eval_interval == 0:
-            if val_loader is not None:
+            if swag and swag_branchout_layers is not None and epoch >= swag_start_epoch:
+                for layer_name in swag_branchout_layers:
+                    print("Sampling SWAG models branching out at %s..." % layer_name)
+                    model.sample_mask = create_sample_mask(model.base_model, layer_name)
+                    model.sample()
+                    swag_writer = SummaryWriter(os.path.join(log_dir, 'branchout_{}'.format(layer_name)))
+
+                    if val_loader is not None:
+                        tag = 'val'
+                        # tag = 'val/branchout_{}'.format(layer_name)
+                        print("Evaluating model on validation data...")
+                        results[tag] = evaluate(model, val_loader, swag_writer, global_step_num, epoch,
+                                null_hypothesis=null_hypothesis,
+                                confidence_level=confidence_level,
+                                tag=tag,
+                                device=device)
+
+                        if 'uncertainty_calibration_data' in results[tag]:
+                            print("Fitting calibration model...")
+                            calibration_model = fit_calibration_model(results[tag]['uncertainty_calibration_data'])
+                        else:
+                            calibration_model = None
+
+                        # if 'calibration_model' not in results:
+                        #     results['calibration_model'] = {}
+                        results['calibration_model/branchout_{}'.format(layer_name)] = calibration_model
+
+                    if test_loader is not None:
+                        tag = 'test'
+                        print("Evaluating model on test data...")
+                        results[tag] = evaluate(model, test_loader, swag_writer, global_step_num, epoch,
+                                                   null_hypothesis=null_hypothesis,
+                                                   confidence_level=confidence_level,
+                                                   calibration_model=calibration_model,
+                                                   tag=tag,
+                                                   device=device)
+                    swag_writer.close()
+            else:
                 if swag and epoch >= swag_start_epoch:
                     print("Sampling SWAG models...")
                     model.sample()
-                print("Evaluating model on validation data...")
-                results['val'] = evaluate(model, val_loader, writer, global_step_num, epoch,
-                        null_hypothesis=null_hypothesis,
-                        confidence_level=confidence_level,
-                        tag='val',
-                        device=device)
 
-                if 'uncertainty_calibration_data' in results['val']:
-                    print("Fitting calibration model...")
-                    calibration_model = fit_calibration_model(results['val']['uncertainty_calibration_data'])
-                else:
-                    calibration_model = None
+                if val_loader is not None:
+                    tag = 'val'
+                    print("Evaluating model on validation data...")
+                    results[tag] = evaluate(model, val_loader, writer, global_step_num, epoch,
+                                            null_hypothesis=null_hypothesis,
+                                            confidence_level=confidence_level,
+                                            tag=tag,
+                                            device=device)
 
-                results['calibration_model'] = calibration_model
+                    if 'uncertainty_calibration_data' in results[tag]:
+                        print("Fitting calibration model...")
+                        calibration_model = fit_calibration_model(results[tag]['uncertainty_calibration_data'])
+                    else:
+                        calibration_model = None
 
-            if test_loader is not None:
-                print("Evaluating model on test data...")
-                results['test'] = evaluate(model, test_loader, writer, global_step_num, epoch,
-                                           null_hypothesis=null_hypothesis,
-                                           confidence_level=confidence_level,
-                                           calibration_model=calibration_model,
-                                           tag='test',
-                                           device=device)
+                    results['calibration_model'] = calibration_model
+
+                if test_loader is not None:
+                    tag = 'test'
+                    print("Evaluating model on test data...")
+                    results[tag] = evaluate(model, test_loader, writer, global_step_num, epoch,
+                                            null_hypothesis=null_hypothesis,
+                                            confidence_level=confidence_level,
+                                            calibration_model=calibration_model,
+                                            tag=tag,
+                                            device=device)
 
         scheduler.step()
 
