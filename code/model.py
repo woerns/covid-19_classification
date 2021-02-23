@@ -4,7 +4,7 @@ import json
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from data import CTImageDataSet
+from data import ImageDataSet
 from utils import load_data_transform, create_bs_train_loader, train, evaluate
 from networks import create_model, create_branching_network, get_swag_branchout_layers
 
@@ -29,7 +29,7 @@ def estimate(X_train, y_train, args):
 
     # Preprocess images and labels
     data_transform = load_data_transform(train=True)
-    train_dataset = CTImageDataSet(X_train, y_train, transform=data_transform)
+    train_dataset = ImageDataSet(X_train, y_train, transform=data_transform)
     # Create bootstrap datasets
     bs_train_loader = create_bs_train_loader(train_dataset, N_BOOTSTRAP, batch_size=BATCH_SIZE)
 
@@ -73,7 +73,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     if X_test is not None and y_test is not None:
         # Create test dataset
         test_data_transform = load_data_transform(train=False)
-        test_dataset = CTImageDataSet(X_test, y_test, transform=test_data_transform)
+        test_dataset = ImageDataSet(X_test, y_test, transform=test_data_transform)
         test_loader = torch.utils.data.DataLoader(test_dataset,
                                                    batch_size=1,
                                                    shuffle=False,
@@ -94,7 +94,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
 
         # Create train dataset
         train_data_transform = load_data_transform(train=True)
-        train_dataset = CTImageDataSet(X_train, y_train, transform=train_data_transform)
+        train_dataset = ImageDataSet(X_train, y_train, transform=train_data_transform)
 
         if USE_BOOTSTRAP:
             # Create bootstrap dataset
@@ -107,7 +107,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
 
         # Create validation datasets
         val_data_transform = load_data_transform(train=False)
-        val_dataset = CTImageDataSet(X_val, y_val, transform=val_data_transform)
+        val_dataset = ImageDataSet(X_val, y_val, transform=val_data_transform)
         val_loader = torch.utils.data.DataLoader(val_dataset,
                                                    batch_size=1,
                                                    shuffle=False,
@@ -158,7 +158,7 @@ def predict(X_test, y_test, args, model=None, calibration_model=None):
 
     # Preprocess images
     data_transform = load_data_transform(train=False)
-    test_dataset = CTImageDataSet(X_test, y_test, transform=data_transform)
+    test_dataset = ImageDataSet(X_test, y_test, transform=data_transform)
     test_loader = torch.utils.data.DataLoader(test_dataset,
                                                batch_size=1,
                                                shuffle=False,
