@@ -81,8 +81,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
 
     # Create cross-validation splits
     group_kfold = sklearn.model_selection.GroupKFold(n_splits=CV_FOLDS)
-    models = []
-    calibration_models = []
+
 
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
         print("Running fold %d..." % fold)
@@ -140,12 +139,9 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
                         log_dir=LOG_DIR, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
         print("Training completed.")
 
-        models.append(model)
-        calibration_models.append(results['calibration_model'])
-
     print("Cross-validation completed.")
 
-    return models, calibration_models
+    return None
 
 
 def predict(X_test, y_test, args, model=None, calibration_model=None):
