@@ -7,7 +7,6 @@ import torch
 
 class SWAG(torch.nn.Module):
     def __init__(self, base_model, n_rank=10, n_samples=10, bn_update_loader=None, sample_mask=None):
-
         super(SWAG, self).__init__()
         self.base_model = base_model
         self.n_rank = n_rank
@@ -142,7 +141,8 @@ class SWAG(torch.nn.Module):
                         # Sample from Gaussian posterior
                         model = self.sampled_models[i]
                         sampled_outputs[i] = model(x)
-                # Assuming outputs have shape (B, K) and second dimension contains K scalar predictions
+                # Assuming outputs have shape (B, P, C) where B is batch size, P is number of predictions
+                # and C is number of classes
                 sampled_outputs = torch.cat(sampled_outputs, dim=1)
 
                 return sampled_outputs

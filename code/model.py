@@ -57,7 +57,6 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     RUN_NAME = args.run_name
     DEVICE = args.device
     CV_FOLDS = args.cv_folds
-    NULL_HYPOTHESIS = args.null_hypothesis
     LOG_DIR = os.path.join("./runs", args.run_name, "seed{0}".format(args.seed))
     MODEL_SAVE_DIR = os.path.join("./models", args.run_name, "seed{0}".format(args.seed))
 
@@ -82,6 +81,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     # Create cross-validation splits
     group_kfold = sklearn.model_selection.GroupKFold(n_splits=CV_FOLDS)
 
+    # NOTE: Infer number of classes from training data labels. This might not be ideal in some cases.
+    n_classes = len(set(y))
 
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
         print("Running fold %d..." % fold)
@@ -126,7 +127,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
             swag_branchout_layers = None
 
         # Create model
-        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, swag=USE_SWAG, swag_rank=args.swag_rank,
+        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, n_classes=n_classes, swag=USE_SWAG, swag_rank=args.swag_rank,
                              swag_samples=args.swag_samples, bn_update_loader=bn_update_loader)
 
         # Train model
@@ -134,9 +135,9 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
                         lr_hl=args.lr_halflife, swag=USE_SWAG, swag_lr=args.swag_learning_rate,
                         swag_start=args.swag_start, swag_momentum=args.swag_momentum, swag_branchout_layers=swag_branchout_layers,
-                        null_hypothesis=NULL_HYPOTHESIS, confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
+                        confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
                         val_loader=val_loader, test_loader=test_loader, eval_interval=args.eval_interval,
-                        log_dir=LOG_DIR, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
+                        log_dir=LOG_DIR, save=args.save, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
         print("Training completed.")
 
     print("Cross-validation completed.")
@@ -150,7 +151,6 @@ def predict(X_test, y_test, args, model=None, calibration_model=None):
     CONFIDENCE_LEVEL = args.conf_level
     RUN_NAME = args.run_name
     DEVICE = args.device
-    NULL_HYPOTHESIS = args.null_hypothesis
 
     # Preprocess images
     data_transform = load_data_transform(train=False)
@@ -164,7 +164,6 @@ def predict(X_test, y_test, args, model=None, calibration_model=None):
     writer = SummaryWriter(log_dir)
 
     test_results = evaluate(model, test_loader, writer, 0, 0, 0,
-                            null_hypothesis=NULL_HYPOTHESIS,
                             confidence_level=CONFIDENCE_LEVEL,
                             calibration_model=calibration_model,
                             tag='test',

@@ -13,17 +13,16 @@ def compute_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
     count = np.zeros_like(bin_centers)
     confidence = np.zeros_like(bin_centers)
     for i in range(len(class_probs)):
-        # Consider both positive and negative class
-        b_pos = np.abs(class_probs[i] - bin_centers).argmin()
-        b_neg = np.abs(1. - class_probs[i] - bin_centers).argmin()
-        confidence[b_pos] += class_probs[i]
-        confidence[b_neg] += (1. - class_probs[i])
-        if y_true[i] == 1:
-            correct_count[b_pos] += 1
-        elif y_true[i] == 0:
-            correct_count[b_neg] += 1
-        count[b_pos] += 1
-        count[b_neg] += 1
+        # Aggregate confidence across all classes
+        for j in range(len(class_probs[i])):
+            # Find nearest bucket
+            b = np.abs(class_probs[i][j] - bin_centers).argmin()
+            confidence[b] += class_probs[i][j]
+
+            if y_true[i] == j:
+                correct_count[b] += 1
+
+            count[b] += 1
 
     acc = np.zeros_like(bin_centers)
     for b in range(bins):
@@ -53,20 +52,33 @@ def compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per
 
 def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
     assert len(class_probs) == len(posterior_params), "class_probs and posterior_params must have same length."
-    
+
+    # TODO: Generalize to multi-class probabilities using Dirichlet distribution
+    # Currently we are only considering max mean class prob for uncertainty estimates and their reliability
+    # so we have to cast it into a binary classification problem (i.e. either max mean prob class or not)
+    y_true = (class_probs.argmax(axis=-1) == y_true).astype(int) # pseudo labels
+    class_probs = class_probs.max(axis=-1)
+    class_probs = np.stack((1.-class_probs, class_probs), axis=1)
+
     N = len(class_probs)
     bin_centers, _, _, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
-    obs_probs = np.zeros_like(class_probs)
+    # We get two observed quantiles: One for predicted probability p and one for 1-p
+    obs_probs = np.zeros(2*N,)
     for i in range(N):
-        b = np.abs(class_probs[i] - bin_centers).argmin()
-        alpha, beta = posterior_params[i]
-        obs_probs[i] = sp.stats.beta.cdf(acc[b], alpha, beta)
-        if calibration_model is not None:
-            if not np.isnan(obs_probs[i]):
-                obs_probs[i] = calibration_model.predict([obs_probs[i]])[0]
+        b_neg = np.abs(class_probs[i][0] - bin_centers).argmin()
+        b_pos = np.abs(class_probs[i][1] - bin_centers).argmin()
 
-    exp_cdf = np.linspace(0.0, 1.0, N + 1)
+        alpha, beta = posterior_params[i]
+        obs_probs[2*i] = sp.stats.beta.cdf(acc[b_neg], beta, alpha)  # NOTE: alpha and beta are switched for opposite class.
+        obs_probs[2*i + 1] = sp.stats.beta.cdf(acc[b_pos], alpha, beta)
+
+    if calibration_model is not None:
+        for j in range(2*N):
+            if not np.isnan(obs_probs[j]):
+                obs_probs[j] = calibration_model.predict([obs_probs[j]])[0]
+
+    exp_cdf = np.linspace(0.0, 1.0, 2*N + 1)
     obs_probs = obs_probs[~np.isnan(obs_probs)] # Remove NaNs
     obs_cdf = np.array([(obs_probs <= x).sum() / len(obs_probs) for x in exp_cdf])
 

@@ -96,9 +96,9 @@ def fit_beta_distribution(pred_probs):
     return alpha, beta
 
 
-def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-covid',
+def evaluate(model, val_loader, writer, step_num, epoch,
              confidence_level=None, calibration_model=None, tag='val', device='cpu'):
-    criterion_prob = torch.nn.BCELoss()
+    criterion = torch.nn.NLLLoss()
     eval_results = {}
 
     total = correct = 0.0
@@ -113,49 +113,49 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     with torch.no_grad():
         for data in val_loader:
             images, labels = data
-            # NOTE: Current implementation only support batch size of 1.
+            # TODO: Current implementation only supports batch size of 1.
             assert images.size(0) == 1, "Evaluation batch size must be 1."
             # push tensors to set device (CPU or GPU)
             images, labels = images.to(device), labels.to(device)
     
             outputs = model(images)
-
-            pred_probs = torch.sigmoid(outputs).data
+            # outputs has shape (B, P, C) where B is batch size,
+            # P is number of predictions and C is number of classes
+            pred_probs = outputs.softmax(dim=2)
             # need to average multiple predictions of all predictions
-            pred_probs = pred_probs.flatten()
-            mean_prob = pred_probs.mean(dim=-1).view(1)
-    
-            loss = criterion_prob(mean_prob, labels.float())
+            mean_prob = pred_probs.mean(dim=1)
+
+            loss = criterion(mean_prob.log(), labels)
             avg_loss += loss.item()
 
-            n_predictions = pred_probs.size(0)
+            n_predictions = pred_probs.size(1)
             if n_predictions > 1:
-                alpha, beta = fit_beta_distribution(pred_probs.cpu().numpy())
+                # TODO: To generalize for multiple classes one can fit a Dirichlet distribution
+                #  and compute the confidence interval or quantiles for each class probability
+                # For now we consider only the maximum mean probability as a binary classification probability
+                # (i.e. either class with max mean prob or not)
+                predicted = mean_prob.argmax(dim=-1)
+                max_class_probs = pred_probs[:, :, predicted].squeeze().cpu().numpy() # Select max mean prob class
+                alpha, beta = fit_beta_distribution(max_class_probs)
 
                 if confidence_level is not None:
                     # Uncertainty-based decision rule
-                    if null_hypothesis == 'non-covid':
-                        quantile = sp.stats.beta.ppf(confidence_level, alpha, beta)
-                    elif null_hypothesis == 'covid':
-                        quantile = sp.stats.beta.ppf(1. - confidence_level, alpha, beta)
-                    else:
-                        raise ValueError('Null hypothesis must be either covid or non-covid.')
+                    # Run left tail statistical test
+                    quantile = sp.stats.beta.ppf(1. - confidence_level, alpha, beta)
 
                     if calibration_model is not None:
                         # Calibrate quantile based on calibration model
                         quantile = calibration_model.predict([quantile])
 
-                    predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1, ))
-                else:
-                    predicted = (mean_prob > 0.5).int()
+                    predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1,))
 
                 posterior_params.append((alpha, beta))
             else:
-                predicted = (mean_prob > 0.5).int()
+                predicted = mean_prob.argmax(dim=-1)
 
             # Compute accuracy
             total += labels.size(0)
-            correct += (predicted == labels.int()).sum().item()
+            correct += (predicted == labels).sum().item()
             acc = correct / total
 
             class_probs.append(mean_prob.cpu().numpy())
@@ -166,7 +166,7 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     y_true = np.concatenate(y_true)
     y_pred = np.concatenate(y_pred)
     class_probs = np.concatenate(class_probs)
-
+    n_classes = class_probs.shape[-1]
     print('[%d] {}_loss: %.3f'.format(tag) % (epoch, avg_loss))
     print('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
 
@@ -174,9 +174,9 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
     writer.add_scalar('Epoch/{}'.format(tag), epoch, step_num)
     writer.add_scalar('Loss/{}'.format(tag), avg_loss, step_num)
     writer.add_scalar('Acc/{}'.format(tag), acc, step_num)
-    writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs), step_num)
-    writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred), step_num)
-    writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per_bin=5), step_num)
+    writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs, labels=list(range(n_classes)), multi_class='ovo'), step_num)
+    writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred, average='macro'), step_num)
+    writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true, bins=10), step_num)
     writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true, bins=10), step_num)
 
     if posterior_params:
@@ -203,8 +203,8 @@ def evaluate(model, val_loader, writer, step_num, epoch, null_hypothesis='non-co
 
 
 def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=True, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9, swag_branchout_layers=None,
-          bootstrap=False, fold=None, confidence_level=None, null_hypothesis=None,
-          val_loader=None, test_loader=None, eval_interval=5, log_dir=None, model_save_dir=None, device='cpu'):
+          bootstrap=False, fold=None, confidence_level=None,
+          val_loader=None, test_loader=None, eval_interval=5, log_dir=None, save=False, model_save_dir=None, device='cpu'):
     if bootstrap:
         assert isinstance(train_loader, list) and len(train_loader) > 0, \
             "Must pass in list of bootstrapped train loaders when applying bootstrap."
@@ -225,7 +225,8 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
     model.to(device)
     model.train()
 
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = torch.nn.CrossEntropyLoss()
+
     if swag:
         swag_optimizer = torch.optim.SGD(model.parameters(), lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -263,20 +264,21 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                 param.grad = None
 
             outputs = model(inputs)
-            if outputs.dim() == 2:
-                # Add additional dimension of prediction for branching network
-                outputs.unsqueeze_(2)
+            # outputs has shape (B, P, C) where B is batch size,
+            # P is number of predictions and C is number of classes
+
             if bootstrap:
                 # NOTE: Forward and back prop for bootstrap ensemble can be optimized.
                 #       Only need to compute it for the kth model.
-                loss = criterion(outputs[:, k, :], labels.view((-1, 1)).float())
+                loss = criterion(outputs[:, k, :], labels)
             else:
-                n_predictions = outputs.shape[1]
+                n_predictions = outputs.size(1)
                 for j in range(n_predictions):
                     if j == 0:
-                        loss = criterion(outputs[:, j, :], labels.view((-1, 1)).float())
+                        loss = criterion(outputs[:, j, :], labels)
                     else:
-                        loss += criterion(outputs[:, j, :], labels.view((-1, 1)).float())
+                        loss += criterion(outputs[:, j, :], labels)
+
                 loss /= n_predictions
 
             loss.backward()
@@ -319,7 +321,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                         # tag = 'val/branchout_{}'.format(layer_name)
                         print("Evaluating model on validation data...")
                         results[tag] = evaluate(model, val_loader, swag_writer, global_step_num, epoch,
-                                null_hypothesis=null_hypothesis,
                                 confidence_level=confidence_level,
                                 tag=tag,
                                 device=device)
@@ -338,7 +339,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                         tag = 'test'
                         print("Evaluating model on test data...")
                         results[tag] = evaluate(model, test_loader, swag_writer, global_step_num, epoch,
-                                                   null_hypothesis=null_hypothesis,
                                                    confidence_level=confidence_level,
                                                    calibration_model=calibration_model,
                                                    tag=tag,
@@ -353,7 +353,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                     tag = 'val'
                     print("Evaluating model on validation data...")
                     results[tag] = evaluate(model, val_loader, writer, global_step_num, epoch,
-                                            null_hypothesis=null_hypothesis,
                                             confidence_level=confidence_level,
                                             tag=tag,
                                             device=device)
@@ -370,7 +369,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                     tag = 'test'
                     print("Evaluating model on test data...")
                     results[tag] = evaluate(model, test_loader, writer, global_step_num, epoch,
-                                            null_hypothesis=null_hypothesis,
                                             confidence_level=confidence_level,
                                             calibration_model=calibration_model,
                                             tag=tag,
@@ -380,21 +378,23 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
 
     writer.close()
 
-    # Save models
-    if not os.path.exists(model_save_dir):
-        os.makedirs(model_save_dir)
+    if save:
+        # Save models
+        if not os.path.exists(model_save_dir):
+            os.makedirs(model_save_dir)
 
-    print("Saving calibration model...")
-    model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
-    with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
-        pickle.dump(calibration_model, file)
+        print("Saving calibration model...")
+        model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
+        with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
+            pickle.dump(calibration_model, file)
 
-    print("Saving model...")
-    if fold is not None:
-        model_file_name = run_name + "_fold{}.pth".format(fold)
-    else:
-        model_file_name = run_name + '.pth'
-    torch.save(model, os.path.join(model_save_dir, model_file_name))
+        print("Saving model...")
+        if fold is not None:
+            model_file_name = run_name + "_fold{}.pth".format(fold)
+        else:
+            model_file_name = run_name + '.pth'
+        torch.save(model, os.path.join(model_save_dir, model_file_name))
+
     print("Done.")
 
     return results

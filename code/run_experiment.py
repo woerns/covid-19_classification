@@ -27,7 +27,6 @@ def run_cv():
     parser.add_argument('-t', '--model_type', choices=['branching', 'ensemble'], default='branching')
     parser.add_argument('--heads', type=int, default=10)
     parser.add_argument('--conf_level', type=float, default=0.0)
-    parser.add_argument('-nh', '--null_hypothesis', choices=['non-covid', 'covid'], default='non-covid')
     parser.add_argument('--swag', action='store_true', default=False)
     parser.add_argument('--branchout', action='store_true', default=False)
 
@@ -54,6 +53,7 @@ def run_cv():
     # The images in the subdirectory are grouped by the label (CT_COVID in the given example).
 
     # Others
+    parser.add_argument('--save', action='store_true', default=False)
     parser.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
     parser.add_argument('--seed', nargs='+', type=int, default=[42, 22, 719662, 945304, 139494, 386078, 307341, 328977, 323004, 795956])
 
@@ -69,6 +69,7 @@ def run_cv():
         if args.bootstrap:
             args.run_name += "_bs"
         args.run_name = "_".join([args.run_name,
+                                  args.dataset.lower(),
                                 "cl{0:.2f}".format(args.conf_level),
                                 datetime.datetime.now().strftime("%Y%m%d-%H%M")])
     if args.conf_level == 0.0:
