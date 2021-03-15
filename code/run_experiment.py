@@ -88,7 +88,7 @@ def run_cv():
         place_seeds(args.seed)
         print("Running experiment with seed %d..." % args.seed)
         # Cross-validate model
-        cv_models, calibration_models = crossvalidate(X, y, groups, args, X_test=X_test, y_test=y_test)
+        crossvalidate(X, y, groups, args, X_test=X_test, y_test=y_test)
 
     time_elapsed = time.time() - start
     print(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
