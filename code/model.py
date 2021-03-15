@@ -129,6 +129,11 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         # Create model
         model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, n_classes=n_classes, swag=USE_SWAG, swag_rank=args.swag_rank,
                              swag_samples=args.swag_samples, bn_update_loader=bn_update_loader)
+        
+        # DataParallel
+        if torch.cuda.device_count() > 1:
+            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            model = torch.nn.DataParallel(model)
 
         # Train model
         print("Training model...")
