@@ -146,9 +146,9 @@ def evaluate(model, val_loader, writer, step_num, epoch,
                     if calibration_model is not None:
                         # Calibrate quantile based on calibration model
                         quantile = calibration_model.predict([quantile])
-
-                    predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1,))
-
+                    
+                    #predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1,))
+                    predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1,)).to(device)
                 posterior_params.append((alpha, beta))
             else:
                 predicted = mean_prob.argmax(dim=-1)
@@ -285,10 +285,17 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
 
             if swag and epoch >= swag_start_epoch:
                 swag_optimizer.step()
-                if bootstrap and isinstance(model, NetEnsemble):
-                    model.update_swag(k) # Only update SWAG params for kth model
+                # DataParallel
+                if isinstance(model, torch.nn.DataParallel):
+                    if bootstrap and isinstance(model.module, NetEnsemble):
+                        model.module.update_swag(k)
+                    else:
+                        model.module.update_swag()
                 else:
-                    model.update_swag() # Update SWAG params for all models
+                    if bootstrap and isinstance(model, NetEnsemble):
+                        model.update_swag(k) # Only update SWAG params for kth model
+                    else:
+                        model.update_swag() # Update SWAG params for all models
             else:
                 optimizer.step()
 
@@ -312,8 +319,13 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
             if swag and swag_branchout_layers is not None and epoch >= swag_start_epoch:
                 for layer_name in swag_branchout_layers:
                     print("Sampling SWAG models branching out at %s..." % layer_name)
-                    model.sample_mask = create_sample_mask(model.base_model, layer_name)
-                    model.sample()
+                    # DataParallel
+                    if isinstance(model, torch.nn.DataParallel):
+                        model.module.sample_mask = create_sample_mask(model.base_model, layer_name)
+                        model.module.sample()
+                    else:
+                        model.sample_mask = create_sample_mask(model.base_model, layer_name)
+                        model.sample()
                     swag_writer = SummaryWriter(os.path.join(log_dir, 'branchout_{}'.format(layer_name)))
 
                     if val_loader is not None:
@@ -347,7 +359,11 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
             else:
                 if swag and epoch >= swag_start_epoch:
                     print("Sampling SWAG models...")
-                    model.sample()
+                    # DataParallel
+                    if isinstance(model, torch.nn.DataParallel):
+                        model.module.sample()
+                    else:
+                        model.sample()
 
                 if val_loader is not None:
                     tag = 'val'
