@@ -321,11 +321,11 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                     print("Sampling SWAG models branching out at %s..." % layer_name)
                     # DataParallel
                     if isinstance(model, torch.nn.DataParallel):
-                        model.module.sample_mask = create_sample_mask(model.base_model, layer_name)
-                        model.module.sample()
+                        model.module.sample_mask = create_sample_mask(model.module.base_model, layer_name)
+                        model.module.sample(device)
                     else:
                         model.sample_mask = create_sample_mask(model.base_model, layer_name)
-                        model.sample()
+                        model.sample(device)
                     swag_writer = SummaryWriter(os.path.join(log_dir, 'branchout_{}'.format(layer_name)))
 
                     if val_loader is not None:
@@ -361,9 +361,9 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5, swag=T
                     print("Sampling SWAG models...")
                     # DataParallel
                     if isinstance(model, torch.nn.DataParallel):
-                        model.module.sample()
+                        model.module.sample(device)
                     else:
-                        model.sample()
+                        model.sample(device)
 
                 if val_loader is not None:
                     tag = 'val'
