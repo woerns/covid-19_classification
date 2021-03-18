@@ -85,10 +85,10 @@ def create_bs_train_loader(dataset, n_bootstrap, batch_size=16):
     return bs_train_loader
 
 
-def fit_beta_distribution(pred_probs):
+def fit_beta_distribution(pred_probs, dim=1):
     # Fit beta distribution using method-of-moments
-    mean = pred_probs.mean()
-    var = pred_probs.var()
+    mean = pred_probs.mean(dim=dim)
+    var = pred_probs.var(dim=dim)
     v = (mean*(1-mean)/var-1.0)
     alpha = mean*v
     beta = (1-mean)*v
@@ -121,22 +121,27 @@ def evaluate(model, val_loader, writer, step_num, epoch,
             outputs = model(images)
             # outputs has shape (B, P, C) where B is batch size,
             # P is number of predictions and C is number of classes
-            pred_probs = outputs.softmax(dim=2)
+            pred_probs = outputs.softmax(dim=-1)
             # need to average multiple predictions of all predictions
-            mean_prob = pred_probs.mean(dim=1)
+            mean_prob = pred_probs.mean(dim=-2)
 
             loss = criterion(mean_prob.log(), labels)
             avg_loss += loss.item()
 
             n_predictions = pred_probs.size(1)
             if n_predictions > 1:
-                # TODO: To generalize for multiple classes one can fit a Dirichlet distribution
-                #  and compute the confidence interval or quantiles for each class probability
-                # For now we consider only the maximum mean probability as a binary classification probability
-                # (i.e. either class with max mean prob or not)
-                predicted = mean_prob.argmax(dim=-1)
-                max_class_probs = pred_probs[:, :, predicted].squeeze().cpu().numpy() # Select max mean prob class
-                alpha, beta = fit_beta_distribution(max_class_probs)
+                # To generalize confidence intervals for multiple classes, we fit a marginal distribution of the joint
+                # Dirichlet distribution with parameters (alpha_0, alpha_1, ... alpha_C) for each class.
+                # The marginal distribution for class j is a Beta distribution with parameters (alpha_j, sum_i,i!=j alpha_i).
+                # We then take the class with the highest confidence quantile as the predicted class.
+                alpha, beta = fit_beta_distribution(pred_probs, dim=-2)
+                # Convert to numpy for subsequent scipy and sklearn functions
+                alpha, beta = alpha.numpy(), beta.numpy()
+
+                # Show warning if fitted Beta distribution is bimodal, i.e. alpha<1 and beta<1
+                is_bimodal = (alpha < 1.) & (beta < 1.)
+                if is_bimodal.any():
+                    print("Warning: Fitted Beta distribution is bimodal.")
 
                 if confidence_level is not None:
                     # Uncertainty-based decision rule
@@ -145,10 +150,21 @@ def evaluate(model, val_loader, writer, step_num, epoch,
 
                     if calibration_model is not None:
                         # Calibrate quantile based on calibration model
-                        quantile = calibration_model.predict([quantile])
-                    
-                    #predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1,))
-                    predicted = torch.from_numpy((quantile > 0.5).astype(int).reshape(1,)).to(device)
+                        # Mirror quantiles of right-tailed distribution to left-tailed distribution for calibration model
+                        quantile[alpha < beta] = 1. - quantile[alpha < beta]
+                        B, C = quantile.shape  # B is batch size and C is number of classes
+                        quantile = quantile.flatten()  # Note: calibration model only accepts 1D array
+                        quantile = calibration_model.predict(quantile)
+                        quantile = quantile.reshape(B, C)
+                        # Map recalibrated quantile back to right-tailed distribution
+                        quantile[alpha < beta] = 1. - quantile[alpha < beta]
+
+                    # Convert back to PyTorch tensor and move to device
+                    quantile = torch.from_numpy(quantile).to(device)
+                    predicted = quantile.argmax(dim=-1)
+                else:
+                    predicted = mean_prob.argmax(dim=-1)
+
                 posterior_params.append((alpha, beta))
             else:
                 predicted = mean_prob.argmax(dim=-1)
@@ -167,6 +183,8 @@ def evaluate(model, val_loader, writer, step_num, epoch,
     y_pred = np.concatenate(y_pred)
     class_probs = np.concatenate(class_probs)
     n_classes = class_probs.shape[-1]
+    posterior_params = tuple(map(np.concatenate, zip(*posterior_params)))  # Change from list of tuples into tuple of numpy arrays.
+
     print('[%d] {}_loss: %.3f'.format(tag) % (epoch, avg_loss))
     print('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
 
@@ -176,22 +194,26 @@ def evaluate(model, val_loader, writer, step_num, epoch,
     writer.add_scalar('Acc/{}'.format(tag), acc, step_num)
     writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs, labels=list(range(n_classes)), multi_class='ovo'), step_num)
     writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred, average='macro'), step_num)
-    writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true, bins=10), step_num)
-    writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true, bins=10), step_num)
+    writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true), step_num)
+    writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true), step_num)
 
     if posterior_params:
-        writer.add_scalar('Wasserstein dist/{}'.format(tag), compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, bins=10), step_num)
-        writer.add_figure('Uncertainty reliability/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10), step_num)
+        writer.add_scalar('Wasserstein dist/{}'.format(tag), compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true), step_num)
+        writer.add_figure('Uncertainty reliability/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None), step_num)
         if calibration_model is not None:
             writer.add_scalar('Wasserstein dist (calibrated)/{}'.format(tag),
                               compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true,
-                                                                 calibration_model=calibration_model, bins=10), step_num)
+                                                                 calibration_model=calibration_model), step_num)
             writer.add_figure('Uncertainty reliability (calibrated)/{}'.format(tag),
                                 plot_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                                calibration_model=calibration_model, bins=10), step_num)
+                                                                calibration_model=calibration_model), step_num)
 
-        eval_results['uncertainty_calibration_data'] = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                                              bins=10)
+        exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true)
+        if exp_cdf.size > 0 and obs_cdf.size > 0:
+            eval_results['uncertainty_calibration_data'] = (exp_cdf, obs_cdf)
+        else:
+            print("Warning: No calibration data. Could be caused if there are not enough samples per bin.")
+
     eval_results['y_pred'] = y_pred
     eval_results['class_probs'] = class_probs
     eval_results['y_true'] = y_true

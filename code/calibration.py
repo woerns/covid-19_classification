@@ -4,17 +4,29 @@ import scipy as sp
 from sklearn.isotonic import IsotonicRegression
 
 
-def compute_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
+def compute_pred_reliability(class_probs, y_true, bins=20, min_obs_per_bin=10):
     assert len(class_probs) == len(y_true), "class_probs and y_true must have same length."
 
-    bin_edges = np.linspace(0.0, 1.0, bins + 1)
-    bin_centers = np.array([(bin_edges[i] + bin_edges[i + 1]) / 2 for i in range(len(bin_edges) - 1)])
+    # Split all probs uniformly into bins. Note that the bins can have different widths.
+    # We do that because after enough training, all predictions tend to be either close to 0 or 1
+    # and we need more granular buckets to estimate the true accuracy.
+    # Alternatively, one could create fixed bins but with finer spacing (e.g. log spacing) at the edge of [0,1].
+    N, C = class_probs.shape
+    n_pad = ((N * C) // bins) * bins - N * C
+    all_probs = class_probs.flatten()
+    all_probs.sort()
+    nans = np.empty((n_pad,))
+    nans[:] = np.nan
+    all_probs = np.append(all_probs, nans)
+    bin_centers = all_probs.reshape((bins, -1)).mean(axis=1)
+
     correct_count = np.zeros_like(bin_centers)
     count = np.zeros_like(bin_centers)
     confidence = np.zeros_like(bin_centers)
-    for i in range(len(class_probs)):
+
+    for i in range(N):
         # Aggregate confidence across all classes
-        for j in range(len(class_probs[i])):
+        for j in range(C):
             # Find nearest bucket
             b = np.abs(class_probs[i][j] - bin_centers).argmin()
             confidence[b] += class_probs[i][j]
@@ -42,7 +54,7 @@ def compute_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
     return bin_centers, count, confidence, acc
 
 
-def compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per_bin=5):
+def compute_expected_calibration_error(class_probs, y_true, bins=20, min_obs_per_bin=10):
     _, count, confidence, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     ece = np.nansum(np.abs(confidence - acc)*count)/count.sum()
@@ -50,36 +62,41 @@ def compute_expected_calibration_error(class_probs, y_true, bins=10, min_obs_per
     return ece
 
 
-def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
-    assert len(class_probs) == len(posterior_params), "class_probs and posterior_params must have same length."
+def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=20, min_obs_per_bin=10):
+    assert len(class_probs) == len(posterior_params[0]) == len(posterior_params[1]), "class_probs and posterior_params must have same length."
 
-    # TODO: Generalize to multi-class probabilities using Dirichlet distribution
-    # Currently we are only considering max mean class prob for uncertainty estimates and their reliability
-    # so we have to cast it into a binary classification problem (i.e. either max mean prob class or not)
-    y_true = (class_probs.argmax(axis=-1) == y_true).astype(int) # pseudo labels
-    class_probs = class_probs.max(axis=-1)
-    class_probs = np.stack((1.-class_probs, class_probs), axis=1)
-
-    N = len(class_probs)
     bin_centers, _, _, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
-    # We get two observed quantiles: One for predicted probability p and one for 1-p
-    obs_probs = np.zeros(2*N,)
-    for i in range(N):
-        b_neg = np.abs(class_probs[i][0] - bin_centers).argmin()
-        b_pos = np.abs(class_probs[i][1] - bin_centers).argmin()
+    N, C = class_probs.shape
+    alpha, beta = posterior_params
+    obs_probs = np.zeros((N, C))
 
-        alpha, beta = posterior_params[i]
-        obs_probs[2*i] = sp.stats.beta.cdf(acc[b_neg], beta, alpha)  # NOTE: alpha and beta are switched for opposite class.
-        obs_probs[2*i + 1] = sp.stats.beta.cdf(acc[b_pos], alpha, beta)
+    for i in range(N):
+        for j in range(C):
+            # Since the Beta distribution is generally not symmetric but is mirrored when its parameters
+            # alpha and beta are exchanged, we map all distributions to be left-tailed (where alpha > beta) before
+            # measuring and calibrating uncertainty quantiles.
+            b = np.abs(class_probs[i][j] - bin_centers).argmin()
+            if alpha[i][j] < beta[i][j]:
+                obs_probs[i][j] = sp.stats.beta.cdf(1. - acc[b], beta[i][j], alpha[i][j])
+            else:
+                obs_probs[i][j] = sp.stats.beta.cdf(acc[b], alpha[i][j], beta[i][j])
+
+    obs_probs = obs_probs.flatten()
+    obs_probs = obs_probs[~np.isnan(obs_probs)]  # Remove NaNs
+    eps = 1e-10  # Note: Too small numbers cause problems with calibration model
+    obs_probs[obs_probs < eps] = 0.0
 
     if calibration_model is not None:
-        for j in range(2*N):
-            if not np.isnan(obs_probs[j]):
-                obs_probs[j] = calibration_model.predict([obs_probs[j]])[0]
+        obs_probs_calibrated = calibration_model.predict(obs_probs)
+        if calibration_model.out_of_bounds == 'nan':
+            # Use uncalibrated values if observed probability outside of training data range.
+            obs_probs = np.where(np.isnan(obs_probs_calibrated), obs_probs, obs_probs_calibrated)
+        else:
+            obs_probs = obs_probs_calibrated
 
-    exp_cdf = np.linspace(0.0, 1.0, 2*N + 1)
-    obs_probs = obs_probs[~np.isnan(obs_probs)] # Remove NaNs
+    obs_probs.sort()  # sort in ascending order
+    exp_cdf = obs_probs
     obs_cdf = np.array([(obs_probs <= x).sum() / len(obs_probs) for x in exp_cdf])
 
     return exp_cdf, obs_cdf
@@ -94,7 +111,7 @@ def compute_wasserstein_dist(cdf_x, cdf_y):
     return wasserstein_dist
 
 
-def compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
+def compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, calibration_model=None, bins=20, min_obs_per_bin=10):
     exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
                                                            calibration_model=calibration_model,
                                                            bins=bins, min_obs_per_bin=min_obs_per_bin)
@@ -103,10 +120,10 @@ def compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, ca
 
 def fit_calibration_model(calibration_data):
     """Fit calibration model using isotonic regression."""
-    exp_probs, obs_probs = calibration_data
-    X, y = obs_probs, exp_probs
+    exp_cdf, obs_cdf = calibration_data
+    X, y = exp_cdf, obs_cdf
 
-    calibration_model = IsotonicRegression(increasing=True, y_min=0.0, y_max=1.0)
+    calibration_model = IsotonicRegression(increasing=True, y_min=0.0, y_max=1.0, out_of_bounds='clip')
     calibration_model = calibration_model.fit(X, y)
     
     return calibration_model

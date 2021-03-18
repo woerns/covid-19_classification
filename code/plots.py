@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 from calibration import compute_pred_reliability, compute_uncertainty_reliability
 
 
-def plot_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
+def plot_pred_reliability(class_probs, y_true, bins=20, min_obs_per_bin=10):
     bin_centers, _, confidence, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     y = confidence - acc
@@ -20,7 +20,9 @@ def plot_pred_reliability(class_probs, y_true, bins=10, min_obs_per_bin=5):
     return fig
 
 
-def plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=10, min_obs_per_bin=5):
+def plot_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=20, min_obs_per_bin=10):
+    # Note: If using a calibration model, set bins and min_obs_per_bin to the same config
+    # that was used to estimate the model. Otherwise, the plot will not show actual calibration performance.
     exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=calibration_model,
                                                            bins=bins, min_obs_per_bin=min_obs_per_bin)
 
