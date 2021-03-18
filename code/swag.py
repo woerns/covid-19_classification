@@ -121,10 +121,16 @@ class SWAG(torch.nn.Module):
 
         self.sampled_models = torch.nn.ModuleList()
 
-        for _ in range(self.n_samples):
+        for i in range(self.n_samples):
             params = self._sample_params()
             model = copy.deepcopy(self.base_model)
             self._set_params(model, params, device)
+
+            # DataParallel
+            if torch.cuda.device_count() > 1:
+                print(f'Sample {i} uses {torch.cuda.device_count()} GPUs!')
+                model = torch.nn.DataParallel(model)
+
             self.update_bn(model, device)
 
             self.sampled_models.append(model)
@@ -140,11 +146,6 @@ class SWAG(torch.nn.Module):
                     for i in range(self.n_samples):
                         # Sample from Gaussian posterior
                         model = self.sampled_models[i]
-
-                        # DataParallel
-                        if torch.cuda.device_count() > 1:
-                            model = torch.nn.DataParallel(model)
-
                         sampled_outputs[i] = model(x)
                 # Assuming outputs have shape (B, P, C) where B is batch size, P is number of predictions
                 # and C is number of classes
