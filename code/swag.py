@@ -24,7 +24,7 @@ class SWAG(torch.nn.Module):
     def _get_params(self):
         params = []
         for p in self.base_model.parameters():
-            params.append(p.detach().numpy().flatten())
+            params.append(p.detach().cpu().numpy().flatten())
         params = np.concatenate(params, axis=0)
 
         return params
@@ -47,12 +47,12 @@ class SWAG(torch.nn.Module):
 
         return params
 
-    def _set_params(self, model, params):
+    def _set_params(self, model, params, device):
         state_dict = copy.deepcopy(model.state_dict())
         idx = 0
         for p in self.param_names:
             n = state_dict[p].numel()
-            state_dict[p].copy_(torch.from_numpy(params[idx:idx + n]).reshape(state_dict[p].shape))
+            state_dict[p].copy_(torch.from_numpy(params[idx:idx + n]).reshape(state_dict[p].shape).to(device))
             idx += n
 
         model.load_state_dict(state_dict, strict=True)
@@ -115,17 +115,23 @@ class SWAG(torch.nn.Module):
         # if neg_var_count > 0:
         #     print("Warning: %d negative variances." % neg_var_count)
 
-    def sample(self):
+    def sample(self, device):
         # Sample from Gaussian posterior
         assert self.param_mean is not None and self.param_second_mom is not None, "First and second moment required. Call update_swag first."
 
         self.sampled_models = torch.nn.ModuleList()
 
-        for _ in range(self.n_samples):
+        for i in range(self.n_samples):
             params = self._sample_params()
             model = copy.deepcopy(self.base_model)
-            self._set_params(model, params)
-            self.update_bn(model)
+            self._set_params(model, params, device)
+
+            # DataParallel
+            if torch.cuda.device_count() > 1:
+                print(f'Sample {i} uses {torch.cuda.device_count()} GPUs!')
+                model = torch.nn.DataParallel(model)
+
+            self.update_bn(model, device)
 
             self.sampled_models.append(model)
 
