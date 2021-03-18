@@ -1,12 +1,12 @@
-import numpy as np
-
 import random
-import torch
 import time
 import datetime
 import argparse
 
-from data import load_dataset
+import numpy as np
+import torch
+
+from data import load_dataset, stratified_sample
 from model import estimate, predict, crossvalidate
 
 
@@ -47,6 +47,9 @@ def run_cv():
     # Dataset
     parser.add_argument('--dataset', type=str, default='ucsd-ai4h')
     parser.add_argument('--data_root_dir', type=str, default='../datasets')
+    parser.add_argument('--n_train_samples', type=int, default=None)
+    parser.add_argument('--n_test_samples', type=int, default=None)
+
     # Note: Datasets must be stored under the data_root_dir
     # using dataset name, i.e. {data_root_dir}/{dataset}/{dataset_version}/
     # e.g. ../datasets/ucsd-ai4h/full/CT_COVID/img001.png
@@ -87,8 +90,19 @@ def run_cv():
         args.seed = seed
         place_seeds(args.seed)
         print("Running experiment with seed %d..." % args.seed)
+        if args.n_train_samples is not None:
+            X_sampled, y_sampled = stratified_sample(X, y, n_samples=args.n_train_samples)
+        else:
+            X_sampled, y_sampled = X, y
+        groups = list(range(len(y_sampled)))
+
+        if args.n_test_samples is not None:
+            X_test_sampled, y_test_sampled = stratified_sample(X_test, y_test, n_samples=args.n_test_samples)
+        else:
+            X_test_sampled, y_test_sampled = X_test, y_test
+
         # Cross-validate model
-        crossvalidate(X, y, groups, args, X_test=X_test, y_test=y_test)
+        crossvalidate(X_sampled, y_sampled, groups, args, X_test=X_test_sampled, y_test=y_test_sampled)
 
     time_elapsed = time.time() - start
     print(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")

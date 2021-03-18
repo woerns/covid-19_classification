@@ -1,4 +1,5 @@
 import os
+import random
 import numpy as np
 import pandas as pd
 
@@ -40,6 +41,19 @@ class ImageDataSet(torch.utils.data.Dataset):
             sample = self.transform(sample)
 
         return sample, target
+
+
+def stratified_sample(X, y, n_samples):
+    n_classes = len(set(y))
+    indices = []
+    for i in range(n_classes):
+        indices.extend(random.sample([idx for idx, val in enumerate(y) if val == i], n_samples//n_classes))
+
+    random.shuffle(indices)
+    X_sampled = X[indices]
+    y_sampled = [y[idx] for idx in indices]
+
+    return X_sampled, y_sampled
 
 
 def load_ai4h_patient_group_map(data_dir):
