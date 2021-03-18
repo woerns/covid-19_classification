@@ -113,8 +113,7 @@ def evaluate(model, val_loader, writer, step_num, epoch,
     with torch.no_grad():
         for data in val_loader:
             images, labels = data
-            # TODO: Current implementation only supports batch size of 1.
-            assert images.size(0) == 1, "Evaluation batch size must be 1."
+
             # push tensors to set device (CPU or GPU)
             images, labels = images.to(device), labels.to(device)
     
@@ -172,13 +171,14 @@ def evaluate(model, val_loader, writer, step_num, epoch,
             # Compute accuracy
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-            acc = correct / total
 
             class_probs.append(mean_prob.cpu().numpy())
             y_pred.append(predicted.cpu().numpy())
             y_true.append(labels.cpu().numpy())
 
     avg_loss /= len(val_loader)
+    acc = correct / total
+
     y_true = np.concatenate(y_true)
     y_pred = np.concatenate(y_pred)
     class_probs = np.concatenate(class_probs)

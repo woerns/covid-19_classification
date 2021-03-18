@@ -74,7 +74,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         test_data_transform = load_data_transform(train=False)
         test_dataset = ImageDataSet(X_test, y_test, transform=test_data_transform)
         test_loader = torch.utils.data.DataLoader(test_dataset,
-                                                   batch_size=1,
+                                                   batch_size=BATCH_SIZE,
                                                    shuffle=False,
                                                    num_workers=0)
 
@@ -109,7 +109,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         val_data_transform = load_data_transform(train=False)
         val_dataset = ImageDataSet(X_val, y_val, transform=val_data_transform)
         val_loader = torch.utils.data.DataLoader(val_dataset,
-                                                   batch_size=1,
+                                                   batch_size=BATCH_SIZE,
                                                    shuffle=False,
                                                    num_workers=0)
 
