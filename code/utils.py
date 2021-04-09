@@ -135,7 +135,7 @@ def evaluate(model, val_loader, writer, step_num, epoch,
                 # We then take the class with the highest confidence quantile as the predicted class.
                 alpha, beta = fit_beta_distribution(pred_probs, dim=-2)
                 # Convert to numpy for subsequent scipy and sklearn functions
-                alpha, beta = alpha.numpy(), beta.numpy()
+                alpha, beta = alpha.cpu().numpy(), beta.cpu().numpy()
 
                 # Show warning if fitted Beta distribution is bimodal, i.e. alpha<1 and beta<1
                 is_bimodal = (alpha < 1.) & (beta < 1.)
