@@ -4,21 +4,21 @@ import scipy as sp
 from sklearn.isotonic import IsotonicRegression
 
 
-def compute_pred_reliability(class_probs, y_true, bins=20, min_obs_per_bin=10):
+def compute_pred_reliability(class_probs, y_true, bins=30, min_obs_per_bin=10):
     assert len(class_probs) == len(y_true), "class_probs and y_true must have same length."
 
-    # Split all probs uniformly into bins. Note that the bins can have different widths.
+    # Use log spacing of bin sizes at the edges of interval [0,1].
     # We do that because after enough training, all predictions tend to be either close to 0 or 1
     # and we need more granular buckets to estimate the true accuracy.
-    # Alternatively, one could create fixed bins but with finer spacing (e.g. log spacing) at the edge of [0,1].
+    # Note going too granular (e.g. bin centered at 0.99999) can introduce a bias
+    # since the accuracy can be estimated only in discrete steps of 1/val_sample_size.
+
     N, C = class_probs.shape
-    n_pad = ((N * C) // bins) * bins - N * C
-    all_probs = class_probs.flatten()
-    all_probs.sort()
-    nans = np.empty((n_pad,))
-    nans[:] = np.nan
-    all_probs = np.append(all_probs, nans)
-    bin_centers = all_probs.reshape((bins, -1)).mean(axis=1)
+    log_bins = bins//3 + int((bins%3==2))
+    lin_bins = bins//3 + int((bins%3==1))
+    bin_centers = np.concatenate((np.logspace(-3, -1, log_bins),
+                                 np.linspace(0.1, 0.9, lin_bins+2)[1:-1],
+                                 1.0 - np.logspace(-1, -3, log_bins)))
 
     correct_count = np.zeros_like(bin_centers)
     count = np.zeros_like(bin_centers)
@@ -54,7 +54,7 @@ def compute_pred_reliability(class_probs, y_true, bins=20, min_obs_per_bin=10):
     return bin_centers, count, confidence, acc
 
 
-def compute_expected_calibration_error(class_probs, y_true, bins=20, min_obs_per_bin=10):
+def compute_expected_calibration_error(class_probs, y_true, bins=30, min_obs_per_bin=10):
     _, count, confidence, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     ece = np.nansum(np.abs(confidence - acc)*count)/count.sum()
@@ -62,14 +62,15 @@ def compute_expected_calibration_error(class_probs, y_true, bins=20, min_obs_per
     return ece
 
 
-def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calibration_model=None, bins=20, min_obs_per_bin=10):
+def compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=None, calibration_model=None, bins=30, min_obs_per_bin=10):
     assert len(class_probs) == len(posterior_params[0]) == len(posterior_params[1]), "class_probs and posterior_params must have same length."
-
+    assert dist_shape in ('unimodal', 'bimodal'), "dist_shape has to be either unimodal or bimodal."
     bin_centers, _, _, acc = compute_pred_reliability(class_probs, y_true, bins=bins, min_obs_per_bin=min_obs_per_bin)
 
     N, C = class_probs.shape
     alpha, beta = posterior_params
-    obs_probs = np.zeros((N, C))
+    obs_probs = np.empty((N, C))
+    obs_probs[:] = np.nan
 
     for i in range(N):
         for j in range(C):
@@ -77,6 +78,14 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calib
             # alpha and beta are exchanged, we map all distributions to be left-tailed (where alpha > beta) before
             # measuring and calibrating uncertainty quantiles.
             b = np.abs(class_probs[i][j] - bin_centers).argmin()
+
+            if dist_shape == 'unimodal' and alpha[i][j] < 1 and beta[i][j] < 1:
+                # Skip if not unimodal
+                continue
+            if dist_shape == 'bimodal' and (alpha[i][j] >= 1 or beta[i][j] >= 1):
+                # Skip if not bimodal
+                continue
+
             if alpha[i][j] < beta[i][j]:
                 obs_probs[i][j] = sp.stats.beta.cdf(1. - acc[b], beta[i][j], alpha[i][j])
             else:
@@ -87,7 +96,7 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, calib
     eps = 1e-10  # Note: Too small numbers cause problems with calibration model
     obs_probs[obs_probs < eps] = 0.0
 
-    if calibration_model is not None:
+    if obs_probs.size > 0 and calibration_model is not None:
         obs_probs_calibrated = calibration_model.predict(obs_probs)
         if calibration_model.out_of_bounds == 'nan':
             # Use uncalibrated values if observed probability outside of training data range.
@@ -111,8 +120,8 @@ def compute_wasserstein_dist(cdf_x, cdf_y):
     return wasserstein_dist
 
 
-def compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, calibration_model=None, bins=20, min_obs_per_bin=10):
-    exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
+def compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, dist_shape=None, calibration_model=None, bins=30, min_obs_per_bin=10):
+    exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=dist_shape,
                                                            calibration_model=calibration_model,
                                                            bins=bins, min_obs_per_bin=min_obs_per_bin)
     return compute_wasserstein_dist(exp_cdf, obs_cdf)
