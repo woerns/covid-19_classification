@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from data import ImageDataSet
 from utils import load_data_transform, create_bs_train_loader, train, evaluate
-from networks import create_model, create_branching_network, get_swag_branchout_layers, DataParallelCustom
+from networks import create_model, create_branching_network, get_swag_branchout_layers
 
 import sklearn
 import sklearn.model_selection
