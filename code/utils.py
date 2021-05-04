@@ -289,7 +289,8 @@ def evaluate(model, val_loader, writer, step_num, epoch,
 
 
 def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
-          swag=True, swag_samples=10, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9, swag_branchout_layers=None,
+          swag=True, swag_samples=10, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
+          swag_interval=10, swag_branchout_layers=None,
           bootstrap=False, fold=None, confidence_level=None,
           val_loader=None, test_loader=None, eval_interval=5, ckpt_interval=None,
           checkpoint=None, log_dir=None, save=False, model_save_dir=None, device='cpu'):
@@ -335,17 +336,21 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_hl, gamma=0.5)
 
     if checkpoint is not None:
-        print(f"Loading checkpoint {checkpoint}...")
-        ckpt = torch.load(checkpoint)
-        init_epoch = ckpt['epoch']
-        model.load_state_dict(ckpt['model_state'])
-        optimizer.load_state_dict(ckpt['optimizer_state'])
-        scheduler.load_state_dict(ckpt['scheduler_state'])
-        random.setstate(ckpt['random_state']['random'])
-        np.random.set_state(ckpt['random_state']['numpy'])
-        torch.random.set_rng_state(ckpt['random_state']['torch'])
-        if swag:
-            swag_optimizer.load_state_dict(ckpt['swag_optimizer_state'])
+        if os.path.exists(checkpoint):
+            print(f"Loading checkpoint {checkpoint}...")
+            ckpt = torch.load(checkpoint)
+            init_epoch = ckpt['epoch']
+            model.load_state_dict(ckpt['model_state'])
+            optimizer.load_state_dict(ckpt['optimizer_state'])
+            scheduler.load_state_dict(ckpt['scheduler_state'])
+            random.setstate(ckpt['random_state']['random'])
+            np.random.set_state(ckpt['random_state']['numpy'])
+            torch.random.set_rng_state(ckpt['random_state']['torch'])
+            if swag:
+                swag_optimizer.load_state_dict(ckpt['swag_optimizer_state'])
+        else:
+            print("Warning: Provided checkpoint path does not exist. Starting training from scratch.")
+            init_epoch = 0
     else:
         init_epoch = 0
 
@@ -358,7 +363,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
     global_step_num = 0
 
-    for epoch in range(init_epoch+1, init_epoch+n_epochs+1):  # loop over the datasets multiple times
+    for epoch in range(init_epoch+1, n_epochs+1):  # loop over the datasets multiple times
         running_loss = 0.0
 
         for i in range(steps_per_epoch):
@@ -403,27 +408,28 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
             if swag and epoch >= swag_start_epoch:
                 swag_optimizer.step()
-                # DataParallel
-                if isinstance(model, torch.nn.DataParallel):
-                    if isinstance(model.module, NetEnsemble):
-                        model.module.update_swag(k)  # Only update SWAG params for kth model
-                    elif isinstance(model.module, MultiSWAG):
-                        model.module.update_swag(k)  # Update SWAG params for kth branch
-                        model.module.update_swag()  # Update SWAG params for trunk
-                else:
-                    if bootstrap:
-                        if isinstance(model, NetEnsemble):
-                            model.update_swag(k)  # Only update SWAG params for kth model
-                        elif isinstance(model, MultiSWAG):
-                            model.update_swag()  # Update SWAG params for trunk
-                            model.update_swag(k)  # Update SWAG params for kth branch
+                if i % swag_interval == 0:
+                    # DataParallel
+                    if isinstance(model, torch.nn.DataParallel):
+                        if isinstance(model.module, NetEnsemble):
+                            model.module.update_swag(k)  # Only update SWAG params for kth model
+                        elif isinstance(model.module, MultiSWAG):
+                            model.module.update_swag(k)  # Update SWAG params for kth branch
+                            model.module.update_swag()  # Update SWAG params for trunk
                     else:
-                        if isinstance(model, MultiSWAG):
-                            model.update_swag()  # Update SWAG params for trunk
-                            for j in range(model.n_branches):
-                                model.update_swag(j)  # Update SWAG params for all branches
+                        if bootstrap:
+                            if isinstance(model, NetEnsemble):
+                                model.update_swag(k)  # Only update SWAG params for kth model
+                            elif isinstance(model, MultiSWAG):
+                                model.update_swag()  # Update SWAG params for trunk
+                                model.update_swag(k)  # Update SWAG params for kth branch
                         else:
-                            model.update_swag()  # Update SWAG params for all models
+                            if isinstance(model, MultiSWAG):
+                                model.update_swag()  # Update SWAG params for trunk
+                                for j in range(model.n_branches):
+                                    model.update_swag(j)  # Update SWAG params for all branches
+                            else:
+                                model.update_swag()  # Update SWAG params for all models
             else:
                 optimizer.step()
 
@@ -505,8 +511,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
                         else:
                             calibration_model = None
 
-                        # if 'calibration_model' not in results:
-                        #     results['calibration_model'] = {}
                         results['calibration_model/branchout_{}'.format(layer_name)] = calibration_model
 
                     if test_loader is not None:

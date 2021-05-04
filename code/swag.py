@@ -171,9 +171,9 @@ class MultiSWAG(torch.nn.Module):
         self.base_model = base_model
         self.n_rank = n_rank
         self.param_names = [name for name, _ in self.base_model.named_parameters()]
-        self.param_mean = [None for _ in range(self.n_branches+1)]  # Length is number of branches + trunk
-        self.param_second_mom = [None for _ in range(self.n_branches+1)]
-        self.param_buffer = [deque() for _ in range(self.n_branches+1)]
+        self.param_mean = [None for _ in range(self.n_branches+int(self.n_branches>1))]  # Length is number of branches + trunk
+        self.param_second_mom = [None for _ in range(self.n_branches+int(self.n_branches>1))]
+        self.param_buffer = [deque() for _ in range(self.n_branches+int(self.n_branches>1))]
         self.n_iter = [0] * (self.n_branches + 1)
         self.bn_update_loader = bn_update_loader
         self.sampled_branches = None
@@ -211,27 +211,34 @@ class MultiSWAG(torch.nn.Module):
     def _sample_params(self, branch_num=None):
         assert branch_num is None or 0 <= branch_num < self.n_branches, "branch_num must be between 0 and {} or None.".format(
             self.n_branches)
+
         if branch_num is None:
             idx = self.n_branches
         else:
             idx = branch_num
-        param_cov_diag = self.param_second_mom[idx] - self.param_mean[idx] ** 2
-        param_cov_diag = np.clip(param_cov_diag, self.min_var, None)
-        # NOTE: Different from Maddox et. al. (https://arxiv.org/abs/1902.02476)
-        # Subtracting current mean rather than running mean.
-        deviations_matrix = np.array(self.param_buffer[idx]) - self.param_mean[idx]
 
+        param_cov_diag = np.clip(self.param_second_mom[idx] - self.param_mean[idx] ** 2, self.min_var, None)
 
         z1 = np.random.normal(size=(len(self.param_mean[idx]),))
         z2 = np.random.normal(size=(len(self.param_buffer[idx]),))
+
+        # NOTE: Compute dot product incrementally, since np.dot causes a memory limit error
+        # for large matrices due to its internal workings of copying the input matrices.
+        dot_prod = np.zeros_like(self.param_mean[idx])
+        for i in range(len(self.param_buffer[idx])):
+            # NOTE: Different from Maddox et. al. (https://arxiv.org/abs/1902.02476)
+            # Subtracting current mean rather than running mean.
+            dot_prod += (self.param_buffer[idx][i] - self.param_mean[idx])*z2[i]
+
         sampled_deviations = (1. / np.sqrt(2) * np.sqrt(param_cov_diag) * z1 +
-                              1. / np.sqrt(2 * (self.n_rank - 1)) * np.dot(deviations_matrix.T, z2))
+                              1. / np.sqrt(2 * (self.n_rank - 1)) * dot_prod)
+
         params = self.param_mean[idx] + sampled_deviations
 
         return params
 
     def _set_params(self, model, params, device):
-        # TODO: Use torch Tensors instead of numpy arrays
+        #  TODO: Use torch Tensors instead of numpy arrays
         state_dict = copy.deepcopy(model.state_dict())
         idx = 0
         for name, _ in model.named_parameters():
@@ -272,27 +279,37 @@ class MultiSWAG(torch.nn.Module):
             self.branches_swag[j].apply(_reset_bn)
             self.branches_swag[j].apply(lambda module: _get_momenta(module, momenta))
 
-        n = 0
-        with torch.no_grad():
-            for inputs, labels in self.bn_update_loader:
-                b = inputs.size(0)
+        # Only need to run if there are any BN layers
+        if momenta:
+            n = 0
+            with torch.no_grad():
+                for inputs, labels in self.bn_update_loader:
+                    b = inputs.size(0)
 
-                momentum = b / float(n + b)
-                for module in momenta.keys():
-                    module.momentum = momentum
+                    momentum = b / float(n + b)
+                    for module in momenta.keys():
+                        module.momentum = momentum
 
-                if device is not None:
-                    inputs = inputs.to(device)
+                    if device is not None:
+                        inputs = inputs.to(device)
 
-                self.swag_forward(inputs)
-                n += b
+                    self.swag_forward(inputs)
+                    n += b
+        else:
+            print("Info: No batch normalization layers detected. No BN update required.")
+
 
     def update_swag(self, branch_num=None):
         assert branch_num is None or 0 <= branch_num < self.n_branches, "branch_num must be between 0 and {} or None.".format(self.n_branches)
+        if self.n_branches == 1 and branch_num is None:
+            # Return if we only have one single branch (i.e. no trunk)
+            return None
+
         if branch_num is None:
             idx = self.n_branches
         else:
             idx = branch_num
+
         # Store and compute SWAG parameters for branch branch_num
         if len(self.param_buffer[idx]) >= self.n_rank:
             self.param_buffer[idx].popleft()
@@ -318,13 +335,10 @@ class MultiSWAG(torch.nn.Module):
 
         # Update SWAG trunk with new SWA
         self.swag_trunk = copy.deepcopy(self.base_model.trunk)
-        # params = self._sample_params()
-        self._set_params(self.swag_trunk, self.param_mean[-1], device)  # Use SWA for trunk params
-        # DataParallel
-        if torch.cuda.device_count() > 1:
-            print(f'SWAG trunk uses {torch.cuda.device_count()} GPUs!')
-            self.swag_trunk = torch.nn.DataParallel(self.swag_trunk)
+        if self.n_branches > 1:
+            self._set_params(self.swag_trunk, self.param_mean[-1], device)  # Use SWA for trunk params
 
+        # Create SWAG branches
         self.branches_fixed = torch.nn.ModuleList([torch.nn.Sequential() for _ in range(self.n_branches)])
         self.branches_swag = torch.nn.ModuleList([torch.nn.Sequential() for _ in range(self.n_branches)])
 
@@ -355,17 +369,11 @@ class MultiSWAG(torch.nn.Module):
                 n_swag_params = 0
                 for p in sampled_branch_model.parameters():
                     n_swag_params += p.numel()
-                swag_params = branch_params[-n_swag_params:]
-
-                self._set_params(sampled_branch_model, swag_params, device)
+                self._set_params(sampled_branch_model, branch_params[-n_swag_params:], device)
 
                 self.sampled_branches[j].append(sampled_branch_model)
-                # # DataParallel
-                # if torch.cuda.device_count() > 1:
-                #     print(f'Sample {i} uses {torch.cuda.device_count()} GPUs!')
-                #     model = torch.nn.DataParallel(model)
 
-        # Update BN for trunk and fixed branches and then reuse for other samples
+        # Update BN for trunk and fixed branches and then reuse for all SWAG branches
         self.update_bn(device)
 
     def swag_forward(self, x):
