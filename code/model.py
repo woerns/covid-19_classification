@@ -118,8 +118,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
                                                        batch_size=BATCH_SIZE,
                                                        shuffle=False,
                                                        num_workers=0)
-            if args.branchout:
-                swag_branchout_layers = get_swag_branchout_layers(MODEL_NAME)
+            if args.swag_branchout:
+                swag_branchout_layers = get_swag_branchout_layers(MODEL_NAME, args.branchout_layer_name)
             else:
                 swag_branchout_layers = None
         else:
@@ -127,7 +127,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
             swag_branchout_layers = None
 
         # Create model
-        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, n_classes=n_classes, swag=USE_SWAG, swag_rank=args.swag_rank,
+        model = create_model(MODEL_NAME, MODEL_TYPE, N_HEADS, n_classes=n_classes, branchout_layer_name=args.branchout_layer_name,
+                             swag=USE_SWAG, swag_rank=args.swag_rank,
                              swag_samples=args.swag_samples, bn_update_loader=bn_update_loader)
         
         # DataParallel
@@ -135,13 +136,24 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             model = torch.nn.DataParallel(model)
 
+        if args.ckpt_dir is not None:
+            if fold is not None:
+                ckpt_file_name = f"{RUN_NAME}_fold{fold}_epoch{args.ckpt_epoch}_ckpt.pth"
+            else:
+                ckpt_file_name = f"{RUN_NAME}_epoch{args.ckpt_epoch}_ckpt.pth"
+
+            checkpoint = os.path.join(args.ckpt_dir, ckpt_file_name)
+        else:
+            checkpoint = None
+
         # Train model
         print("Training model...")
         results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
-                        lr_hl=args.lr_halflife, swag=USE_SWAG, swag_lr=args.swag_learning_rate,
+                        lr_hl=args.lr_halflife, swag=USE_SWAG, swag_samples=args.swag_samples, swag_lr=args.swag_learning_rate,
                         swag_start=args.swag_start, swag_momentum=args.swag_momentum, swag_branchout_layers=swag_branchout_layers,
                         confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
-                        val_loader=val_loader, test_loader=test_loader, eval_interval=args.eval_interval,
+                        val_loader=val_loader, test_loader=test_loader,
+                        eval_interval=args.eval_interval, ckpt_interval=args.ckpt_interval, checkpoint=checkpoint,
                         log_dir=LOG_DIR, save=args.save, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
         print("Training completed.")
 
