@@ -200,7 +200,7 @@ def get_swag_branchout_layers(model_name, branchout_layer_name=None):
     return branchout_layers
 
 
-def create_model(model_name, model_type, n_heads, n_classes, swag=False, swag_rank=10, swag_samples=10, bn_update_loader=None):
+def create_model(model_name, model_type, n_heads, n_classes, branchout_layer_name=None, swag=False, swag_rank=10, swag_samples=10, bn_update_loader=None):
     if swag:
         assert bn_update_loader is not None, "Must provide training data loader for BN update when applying SWAG."
 
