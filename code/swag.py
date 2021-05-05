@@ -134,11 +134,6 @@ class SWAG(torch.nn.Module):
             model = copy.deepcopy(self.base_model)
             self._set_params(model, params, device)
 
-            # DataParallel
-            if torch.cuda.device_count() > 1:
-                print(f'Sample {i} uses {torch.cuda.device_count()} GPUs!')
-                model = torch.nn.DataParallel(model)
-
             self.update_bn(model, device)
 
             self.sampled_models.append(model)

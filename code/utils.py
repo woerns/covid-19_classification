@@ -157,7 +157,7 @@ def evaluate(model, val_loader, writer, step_num, epoch,
                 # We then take the class with the highest confidence quantile as the predicted class.
                 alpha, beta = fit_beta_distribution(pred_probs, dim=-2)
                 # Convert to numpy for subsequent scipy and sklearn functions
-                alpha, beta = alpha.numpy(), beta.numpy()
+                alpha, beta = alpha.cpu().numpy(), beta.cpu().numpy()
 
                 # Show warning if fitted Beta distribution is bimodal, i.e. alpha<1 and beta<1
                 is_bimodal = (alpha < 1.) & (beta < 1.)
@@ -316,22 +316,27 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
     criterion = torch.nn.CrossEntropyLoss()
 
+    if isinstance(model, torch.nn.DataParallel):
+        module = model.module
+    else:
+        module = model
+
     if swag:
-        if not isinstance(model, NetEnsemble) and isinstance(model.base_model, BranchingNetwork):
+        if not isinstance(module, NetEnsemble) and isinstance(module.base_model, BranchingNetwork):
             swag_optimizer = torch.optim.SGD([
-                {'params': model.trunk.parameters()},
-                {'params': model.branches.parameters(), 'lr': swag_lr*model.n_branches}
+                {'params': module.trunk.parameters()},
+                {'params': module.branches.parameters(), 'lr': swag_lr*module.n_branches}
             ], lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
         else:
-            swag_optimizer = torch.optim.SGD(model.parameters(), lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
+            swag_optimizer = torch.optim.SGD(module.parameters(), lr=swag_lr, momentum=swag_momentum, weight_decay=0.0)
 
-    if isinstance(model, BranchingNetwork) or (swag and isinstance(model.base_model, BranchingNetwork)):
+    if isinstance(module, BranchingNetwork) or (swag and isinstance(module.base_model, BranchingNetwork)):
         optimizer = torch.optim.Adam([
-            {'params': model.trunk.parameters()},
-            {'params': model.branches.parameters(), 'lr': lr*model.n_branches}
+            {'params': module.trunk.parameters()},
+            {'params': module.branches.parameters(), 'lr': lr*module.n_branches}
         ], lr=lr)
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(module.parameters(), lr=lr)
 
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_hl, gamma=0.5)
 
@@ -452,7 +457,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             print("Saving checkpoint...")
             ckpt = {
                 'epoch': epoch,
-                'model_state': model.state_dict(),
+                'model_state': module.state_dict(),
                 'optimizer_state': optimizer.state_dict(),
                 'scheduler_state': scheduler.state_dict(),
                 'random_state': {
