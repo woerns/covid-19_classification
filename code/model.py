@@ -150,7 +150,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         print("Training model...")
         results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
                         lr_hl=args.lr_halflife, swag=USE_SWAG, swag_samples=args.swag_samples, swag_lr=args.swag_learning_rate,
-                        swag_start=args.swag_start, swag_momentum=args.swag_momentum, swag_branchout_layers=swag_branchout_layers,
+                        swag_start=args.swag_start, swag_momentum=args.swag_momentum, swag_interval=args.swag_interval,
+                        swag_branchout_layers=swag_branchout_layers,
                         confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
                         val_loader=val_loader, test_loader=test_loader,
                         eval_interval=args.eval_interval, ckpt_interval=args.ckpt_interval, checkpoint=checkpoint,

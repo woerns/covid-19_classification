@@ -105,9 +105,9 @@ class BranchingNetwork(torch.nn.Module):
     def _create_branchout(self, model):
         named_layers = self._get_named_layers(model)
 
-        # Branchout at last layer if not provided
+        # Branchout at first layer if not provided, i.e. we get a single branch, no trunk.
         if self._branchout_layer_name is None:
-            self._branchout_layer_name = named_layers[-1][0]
+            self._branchout_layer_name = named_layers[0][0]
 
         branchout = False
         self.trunk = torch.nn.Sequential()
