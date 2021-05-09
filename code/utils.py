@@ -16,6 +16,7 @@ from networks import NetEnsemble, BranchingNetwork
 from calibration import compute_expected_calibration_error, compute_uncertainty_reliability, compute_posterior_wasserstein_dist, fit_calibration_model
 from plots import plot_pred_reliability, plot_uncertainty_reliability
 from swag import MultiSWAG
+from logger import logger
 
 
 def load_data_transform(train=False, add_mask=False):
@@ -107,7 +108,7 @@ def fit_beta_distribution(pred_probs, dim=1):
     var = pred_probs.var(dim=dim)
 
     if (mean*(1-mean) < var).any().item():
-        print("Warning: Beta distribution parameters negative using unbiased variance. Using biased variance.")
+        logger.warning("Beta distribution parameters negative using unbiased variance. Using biased variance.")
         var_biased = pred_probs.var(dim=dim, unbiased=False)
         var = torch.where(mean*(1-mean)<var, var_biased, var)
 
@@ -162,7 +163,7 @@ def evaluate(model, val_loader, writer, step_num, epoch,
                 # Show warning if fitted Beta distribution is bimodal, i.e. alpha<1 and beta<1
                 is_bimodal = (alpha < 1.) & (beta < 1.)
                 if is_bimodal.any():
-                    print("Warning: Fitted Beta distribution is bimodal.")
+                    logger.warning("Fitted Beta distribution is bimodal.")
 
                 if confidence_level is not None:
                     # Uncertainty-based decision rule
@@ -217,8 +218,8 @@ def evaluate(model, val_loader, writer, step_num, epoch,
     n_classes = class_probs.shape[-1]
     posterior_params = tuple(map(np.concatenate, zip(*posterior_params)))  # Change from list of tuples into tuple of numpy arrays.
 
-    print('[%d] {}_loss: %.3f'.format(tag) % (epoch, avg_loss))
-    print('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
+    logger.info('[%d] {}_loss: %.3f'.format(tag) % (epoch, avg_loss))
+    logger.info('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
 
     # Write to tensorboard
     writer.add_scalar('Epoch/{}'.format(tag), epoch, step_num)
@@ -269,14 +270,14 @@ def evaluate(model, val_loader, writer, step_num, epoch,
         if exp_cdf.size > 0 and obs_cdf.size > 0:
             eval_results['uncertainty_calibration_data']['unimodal'] = (exp_cdf, obs_cdf)
         else:
-            print("Warning: No calibration data. Could be caused if there are not enough samples per bin.")
+            logger.warning("No calibration data. Could be caused if there are not enough samples per bin.")
 
         exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
                                                            dist_shape='bimodal')
         if exp_cdf.size > 0 and obs_cdf.size > 0:
             eval_results['uncertainty_calibration_data']['bimodal'] = (exp_cdf, obs_cdf)
         else:
-            print("Warning: No calibration data. Could be caused if there are not enough samples per bin.")
+            logger.warning("No calibration data. Could be caused if there are not enough samples per bin.")
 
     eval_results['y_pred'] = y_pred
     eval_results['class_probs'] = class_probs
@@ -290,7 +291,7 @@ def evaluate(model, val_loader, writer, step_num, epoch,
 
 def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
           swag=True, swag_samples=10, swag_start=0.8, swag_lr=0.0001, swag_momentum=0.9,
-          swag_interval=10, swag_branchout_layers=None,
+          swag_interval=10, swag_branchout_layers=None, swag_bn_data_ratio=1.0,
           bootstrap=False, fold=None, confidence_level=None,
           val_loader=None, test_loader=None, eval_interval=5, ckpt_interval=None,
           checkpoint=None, log_dir=None, save=False, model_save_dir=None, device='cpu'):
@@ -342,7 +343,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
     if checkpoint is not None:
         if os.path.exists(checkpoint):
-            print(f"Loading checkpoint {checkpoint}...")
+            logger.info(f"Loading checkpoint {checkpoint}...")
             ckpt = torch.load(checkpoint)
             init_epoch = ckpt['epoch']
             model.load_state_dict(ckpt['model_state'])
@@ -354,7 +355,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             if swag:
                 swag_optimizer.load_state_dict(ckpt['swag_optimizer_state'])
         else:
-            print("Warning: Provided checkpoint path does not exist. Starting training from scratch.")
+            logger.warning("Provided checkpoint path does not exist. Starting training from scratch.")
             init_epoch = 0
     else:
         init_epoch = 0
@@ -440,11 +441,11 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
             global_step_num += 1
 
-            # print statistics
+            # log statistics
             running_loss += loss.item()
-            if i % 10 == 0:  # print every 10 mini-batches
+            if i % 10 == 0:  # log every 10 mini-batches
                 if i > 0:
-                    print('[%d, %3d] train_loss: %.5f' % (epoch, i, running_loss / 10))
+                    logger.info('[%d, %3d] train_loss: %.5f' % (epoch, i, running_loss / 10))
                     writer.add_scalar('Loss/train', running_loss / 10, global_step_num)
                     running_loss = 0.0
 
@@ -454,7 +455,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
                     writer.add_scalar('Learning rate/main/train', optimizer.param_groups[0]['lr'], global_step_num)
 
         if ckpt_interval is not None and epoch % ckpt_interval == 0:
-            print("Saving checkpoint...")
+            logger.info("Saving checkpoint...")
             ckpt = {
                 'epoch': epoch,
                 'model_state': module.state_dict(),
@@ -478,35 +479,35 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
                 os.makedirs(model_save_dir)
 
             torch.save(ckpt, os.path.join(model_save_dir, ckpt_file_name))
-            print("Saving completed.")
+            logger.info("Saving completed.")
             
         if epoch % eval_interval == 0:
             if swag and swag_branchout_layers is not None and epoch >= swag_start_epoch:
                 for layer_name in swag_branchout_layers:
-                    print("Sampling SWAG models branching out at %s..." % layer_name)
+                    logger.info("Sampling SWAG models branching out at %s..." % layer_name)
                     # DataParallel
                     if isinstance(model, torch.nn.DataParallel):
-                        model.module.sample(swag_samples, layer_name, device)
+                        model.module.sample(swag_samples, layer_name, swag_bn_data_ratio, device)
                     else:
                         # For SWAG model (depricated)
                         # model.sample_masks = [create_sample_mask(model.base_model, layer_name, branch_num=i) for i in range(model.base_model.n_heads)]
                         # model.sample(device)
                         # For Multi-SWAG model
-                        model.sample(swag_samples, layer_name, device)
+                        model.sample(swag_samples, layer_name, swag_bn_data_ratio, device)
 
                     swag_writer = SummaryWriter(os.path.join(log_dir, 'branchout_{}'.format(layer_name)))
 
                     if val_loader is not None:
                         tag = 'val'
                         # tag = 'val/branchout_{}'.format(layer_name)
-                        print("Evaluating model on validation data...")
+                        logger.info("Evaluating model on validation data...")
                         results[tag] = evaluate(model, val_loader, swag_writer, global_step_num, epoch,
                                 confidence_level=confidence_level,
                                 tag=tag,
                                 device=device)
 
                         if 'uncertainty_calibration_data' in results[tag]:
-                            print("Fitting calibration model...")
+                            logger.info("Fitting calibration model...")
                             calibration_model = {}
                             if 'unimodal' in results[tag]['uncertainty_calibration_data']:
                                 calibration_model['unimodal'] = fit_calibration_model(results[tag]['uncertainty_calibration_data']['unimodal'])
@@ -520,7 +521,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
                     if test_loader is not None:
                         tag = 'test'
-                        print("Evaluating model on test data...")
+                        logger.info("Evaluating model on test data...")
                         results[tag] = evaluate(model, test_loader, swag_writer, global_step_num, epoch,
                                                    confidence_level=confidence_level,
                                                    calibration_model=calibration_model,
@@ -529,23 +530,23 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
                     swag_writer.close()
             else:
                 if swag and epoch >= swag_start_epoch:
-                    print("Sampling SWAG models...")
+                    logger.info("Sampling SWAG models...")
                     # DataParallel
                     if isinstance(model, torch.nn.DataParallel):
-                        model.module.sample(device)
+                        model.module.sample(swag_samples, None, swag_bn_data_ratio, device)
                     else:
-                        model.sample(device)
+                        model.sample(swag_samples, None, swag_bn_data_ratio, device)
 
                 if val_loader is not None:
                     tag = 'val'
-                    print("Evaluating model on validation data...")
+                    logger.info("Evaluating model on validation data...")
                     results[tag] = evaluate(model, val_loader, writer, global_step_num, epoch,
                                             confidence_level=confidence_level,
                                             tag=tag,
                                             device=device)
 
                     if 'uncertainty_calibration_data' in results[tag]:
-                        print("Fitting calibration model...")
+                        logger.info("Fitting calibration model...")
                         calibration_model = {}
                         if 'unimodal' in results[tag]['uncertainty_calibration_data']:
                             calibration_model['unimodal'] = fit_calibration_model(
@@ -560,7 +561,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
                 if test_loader is not None:
                     tag = 'test'
-                    print("Evaluating model on test data...")
+                    logger.info("Evaluating model on test data...")
                     results[tag] = evaluate(model, test_loader, writer, global_step_num, epoch,
                                             confidence_level=confidence_level,
                                             calibration_model=calibration_model,
@@ -576,18 +577,18 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
 
-        print("Saving calibration model...")
+        logger.info("Saving calibration model...")
         model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
         with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
             pickle.dump(calibration_model, file)
 
-        print("Saving model...")
+        logger.info("Saving model...")
         if fold is not None:
             model_file_name = run_name + "_fold{}.pth".format(fold)
         else:
             model_file_name = run_name + '.pth'
         torch.save(model, os.path.join(model_save_dir, model_file_name))
 
-    print("Done.")
+    logger.info("Done.")
 
     return results

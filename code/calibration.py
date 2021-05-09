@@ -136,4 +136,3 @@ def fit_calibration_model(calibration_data):
     calibration_model = calibration_model.fit(X, y)
     
     return calibration_model
-    

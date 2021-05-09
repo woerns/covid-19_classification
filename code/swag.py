@@ -3,6 +3,7 @@ from collections import deque
 
 import numpy as np
 import torch
+from logger import logger
 
 
 class SWAG(torch.nn.Module):
@@ -121,7 +122,7 @@ class SWAG(torch.nn.Module):
 
         # neg_var_count = (self.param_second_mom - self.param_mean ** 2 < 0).sum()
         # if neg_var_count > 0:
-        #     print("Warning: %d negative variances." % neg_var_count)
+        #     logger.warning("%d negative variances." % neg_var_count)
 
     def sample(self, device):
         # Sample from Gaussian posterior
@@ -243,7 +244,7 @@ class MultiSWAG(torch.nn.Module):
 
         model.load_state_dict(state_dict, strict=True)
 
-    def update_bn(self, device=None):
+    def update_bn(self, swag_bn_data_ratio=1.0, device=None):
         assert self.bn_update_loader is not None, "Must provide bn_update_loader to update BN layers."
 
         def _reset_bn(module):
@@ -276,11 +277,15 @@ class MultiSWAG(torch.nn.Module):
 
         # Only need to run if there are any BN layers
         if momenta:
+            logger.info("Updating batch normalization layers.")
+            n_batches_to_run = int(len(self.bn_update_loader) * swag_bn_data_ratio)
             n = 0
             with torch.no_grad():
-                for inputs, labels in self.bn_update_loader:
+                for i, (inputs, labels) in enumerate(self.bn_update_loader):
+                    if i >= n_batches_to_run:
+                        break
                     b = inputs.size(0)
-
+                    logger.info("Processed samples: %d" % n)
                     momentum = b / float(n + b)
                     for module in momenta.keys():
                         module.momentum = momentum
@@ -291,7 +296,7 @@ class MultiSWAG(torch.nn.Module):
                     self.swag_forward(inputs)
                     n += b
         else:
-            print("Info: No batch normalization layers detected. No BN update required.")
+            logger.info("No batch normalization layers detected. No BN update required.")
 
 
     def update_swag(self, branch_num=None):
@@ -324,7 +329,7 @@ class MultiSWAG(torch.nn.Module):
         # if neg_var_count > 0:
         #     print("Warning: %d negative variances." % neg_var_count)
 
-    def sample(self, n_samples, swag_start_layer=None, device='cpu'):
+    def sample(self, n_samples, swag_start_layer=None, swag_bn_data_ratio=1.0, device='cpu'):
         # Sample from Gaussian posterior
         assert all(x is not None for x in self.param_mean) and all(x is not None for x in self.param_second_mom), "First and second moment required. Call update_swag first."
 
@@ -369,7 +374,7 @@ class MultiSWAG(torch.nn.Module):
                 self.sampled_branches[j].append(sampled_branch_model)
 
         # Update BN for trunk and fixed branches and then reuse for all SWAG branches
-        self.update_bn(device)
+        self.update_bn(swag_bn_data_ratio=swag_bn_data_ratio, device=device)
 
     def swag_forward(self, x):
         assert self.sampled_branches is not None, "No SWAG samples available. Must sample SWAG models first."

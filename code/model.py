@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -60,9 +61,10 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     LOG_DIR = os.path.join("./runs", args.run_name, "seed{0}".format(args.seed))
     MODEL_SAVE_DIR = os.path.join("./models", args.run_name, "seed{0}".format(args.seed))
 
-    print("Run configuration:")
-    for k, v in args.__dict__.items():
-        print("{0}: {1}".format(k, v))
+    logger = logging.getLogger('main')
+
+    logger.info("Run configuration:")
+    logger.info('\n'.join(("{0}: {1}".format(k, v) for k, v in args.__dict__.items())))
 
     if not os.path.exists(MODEL_SAVE_DIR):
         os.makedirs(MODEL_SAVE_DIR)
@@ -85,12 +87,12 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     n_classes = len(set(y))
 
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
-        print("Running fold %d..." % fold)
+        logger.info("Running fold %d..." % fold)
 
         X_train, y_train = [X[i] for i in train_idx], [y[i] for i in train_idx]
         X_val, y_val = [X[i] for i in val_idx], [y[i] for i in val_idx]
-        print("Training samples: %d" % len(y_train))
-        print("Validation samples: %d" % len(y_val))
+        logger.info("Training samples: %d" % len(y_train))
+        logger.info("Validation samples: %d" % len(y_val))
 
         # Create train dataset
         train_data_transform = load_data_transform(train=True)
@@ -116,7 +118,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         if USE_SWAG:
             bn_update_loader = torch.utils.data.DataLoader(train_dataset,
                                                        batch_size=BATCH_SIZE,
-                                                       shuffle=False,
+                                                       shuffle=True,
                                                        num_workers=0)
             if args.swag_branchout:
                 swag_branchout_layers = get_swag_branchout_layers(MODEL_NAME, args.branchout_layer_name)
@@ -133,7 +135,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         
         # DataParallel
         if torch.cuda.device_count() > 1:
-            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            logger.info("Let's use", torch.cuda.device_count(), "GPUs!")
             model = torch.nn.DataParallel(model)
 
         if args.ckpt_dir is not None:
@@ -147,18 +149,18 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
             checkpoint = None
 
         # Train model
-        print("Training model...")
-        results = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
+        logger.info("Training model...")
+        _ = train(model, train_loader, run_name=RUN_NAME, fold=fold, n_epochs=N_EPOCHS, lr=LEARNING_RATE,
                         lr_hl=args.lr_halflife, swag=USE_SWAG, swag_samples=args.swag_samples, swag_lr=args.swag_learning_rate,
                         swag_start=args.swag_start, swag_momentum=args.swag_momentum, swag_interval=args.swag_interval,
-                        swag_branchout_layers=swag_branchout_layers,
+                        swag_branchout_layers=swag_branchout_layers, swag_bn_data_ratio=args.swag_bn_data_ratio,
                         confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
                         val_loader=val_loader, test_loader=test_loader,
                         eval_interval=args.eval_interval, ckpt_interval=args.ckpt_interval, checkpoint=checkpoint,
                         log_dir=LOG_DIR, save=args.save, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
-        print("Training completed.")
+        logger.info("Training completed.")
 
-    print("Cross-validation completed.")
+    logger.info("Cross-validation completed.")
 
     return None
 

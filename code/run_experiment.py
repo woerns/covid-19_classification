@@ -1,13 +1,15 @@
+import os
 import random
 import time
-import datetime
 import argparse
+import logging
 
 import numpy as np
 import torch
 
 from data import load_dataset, stratified_sample
-from model import estimate, predict, crossvalidate
+from model import crossvalidate
+from logger import logger
 
 
 def place_seeds(seed):
@@ -42,6 +44,7 @@ def run_cv():
     parser.add_argument('--swag_samples', type=int, default=10)
     parser.add_argument('--swag_start', type=float, default=0.8)
     parser.add_argument('--swag_interval', type=int, default=10)
+    parser.add_argument('--swag_bn_data_ratio', type=float, default=0.1)
     parser.add_argument('--cv_folds', type=int, default=5)
     parser.add_argument('--bootstrap', action='store_true', default=False)
     parser.add_argument('--eval_interval', type=int, default=5)
@@ -92,6 +95,14 @@ def run_cv():
         args.conf_level = None
 
     seed_list = args.seed
+
+    # Initialize logger
+    log_file_name = os.path.join("./models", "".join((args.run_name, ".log")))
+    file_handler = logging.FileHandler(log_file_name, mode='w')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    logger.addHandler(file_handler)
+
     # Load training and validation data
     X, y, groups = load_dataset(args.dataset, args.data_root_dir, dataset_version='full')
     # Load test data
@@ -102,7 +113,7 @@ def run_cv():
         # Set seeds
         args.seed = seed
         place_seeds(args.seed)
-        print("Running experiment with seed %d..." % args.seed)
+        logger.info("Running experiment with seed %d..." % args.seed)
         if args.n_train_samples is not None:
             X_sampled, y_sampled = stratified_sample(X, y, n_samples=args.n_train_samples)
         else:
@@ -118,11 +129,8 @@ def run_cv():
         crossvalidate(X_sampled, y_sampled, groups, args, X_test=X_test_sampled, y_test=y_test_sampled)
 
     time_elapsed = time.time() - start
-    print(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
-    print("Done.")
-
-
-    print("done")
+    logger.info(f"Total train time: {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s")
+    logger.info("Done.")
 
 
 if __name__ == '__main__':
