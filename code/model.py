@@ -58,7 +58,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     RUN_NAME = args.run_name
     DEVICE = args.device
     CV_FOLDS = args.cv_folds
-    LOG_DIR = os.path.join("./runs", args.run_name, "seed{0}".format(args.seed))
+    TENSORBOARD_LOG_DIR = os.path.join("./runs", args.run_name, "seed{0}".format(args.seed))
     MODEL_SAVE_DIR = os.path.join("./models", args.run_name, "seed{0}".format(args.seed))
 
     logger = logging.getLogger('main')
@@ -157,7 +157,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
                         confidence_level=CONFIDENCE_LEVEL, bootstrap=USE_BOOTSTRAP,
                         val_loader=val_loader, test_loader=test_loader,
                         eval_interval=args.eval_interval, ckpt_interval=args.ckpt_interval, checkpoint=checkpoint,
-                        log_dir=LOG_DIR, save=args.save, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
+                        log_dir=TENSORBOARD_LOG_DIR, save=args.save, model_save_dir=MODEL_SAVE_DIR, device=DEVICE)
         logger.info("Training completed.")
 
     logger.info("Cross-validation completed.")

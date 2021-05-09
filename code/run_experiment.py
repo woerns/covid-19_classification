@@ -97,7 +97,10 @@ def run_cv():
     seed_list = args.seed
 
     # Initialize logger
-    log_file_name = os.path.join("./models", "".join((args.run_name, ".log")))
+    log_dir = "./logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    log_file_name = os.path.join(log_dir, "".join((args.run_name, ".log")))
     file_handler = logging.FileHandler(log_file_name, mode='w')
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
