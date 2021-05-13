@@ -285,7 +285,7 @@ class MultiSWAG(torch.nn.Module):
                     if i >= n_batches_to_run:
                         break
                     b = inputs.size(0)
-                    logger.info("Processed samples: %d" % n)
+                    logger.debug("Processed samples: %d" % n)
                     momentum = b / float(n + b)
                     for module in momenta.keys():
                         module.momentum = momentum

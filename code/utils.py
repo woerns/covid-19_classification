@@ -163,7 +163,7 @@ def evaluate(model, val_loader, writer, step_num, epoch,
                 # Show warning if fitted Beta distribution is bimodal, i.e. alpha<1 and beta<1
                 is_bimodal = (alpha < 1.) & (beta < 1.)
                 if is_bimodal.any():
-                    logger.warning("Fitted Beta distribution is bimodal.")
+                    logger.info("Fitted Beta distribution is bimodal.")
 
                 if confidence_level is not None:
                     # Uncertainty-based decision rule
@@ -222,23 +222,35 @@ def evaluate(model, val_loader, writer, step_num, epoch,
     logger.info('[%d] {}_acc: %.1f %%'.format(tag) % (epoch, 100 * acc))
 
     # Write to tensorboard
+    logger.info("Computing performance metrics...")
     writer.add_scalar('Epoch/{}'.format(tag), epoch, step_num)
     writer.add_scalar('Loss/{}'.format(tag), avg_loss, step_num)
     writer.add_scalar('Acc/{}'.format(tag), acc, step_num)
     writer.add_scalar('AUC/{}'.format(tag), sklearn.metrics.roc_auc_score(y_true, class_probs, labels=list(range(n_classes)), multi_class='ovo'), step_num)
     writer.add_scalar('F1/{}'.format(tag), sklearn.metrics.f1_score(y_true, y_pred, average='macro'), step_num)
     writer.add_scalar('ECE/{}'.format(tag), compute_expected_calibration_error(class_probs, y_true), step_num)
+    logger.info("Generating prediction reliabiltiy plot...")
     writer.add_figure('Prediction reliability/{}'.format(tag), plot_pred_reliability(class_probs, y_true), step_num)
 
     if posterior_params:
+        logger.info("Computing Wasserstein (unimodal) distance...")
         writer.add_scalar('Wasserstein dist (unimodal)/{}'.format(tag), compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, dist_shape='unimodal'), step_num)
+        logger.info("Computing Wasserstein (bimodal) distance...")
         writer.add_scalar('Wasserstein dist (bimodal)/{}'.format(tag),
                           compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true,
                                                              dist_shape='bimodal'), step_num)
-        writer.add_figure('Uncertainty reliability (unimodal)/{}'.format(tag), plot_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape='unimodal', calibration_model=None), step_num)
-        writer.add_figure('Uncertainty reliability (bimodal)/{}'.format(tag),
-                          plot_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape='bimodal', calibration_model=None),
-                          step_num)
+        logger.info("Generating uncertainty reliability (unimodal) plot...")
+        unimodal_fig, unimodal_calibration_data = plot_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                                               dist_shape='unimodal',
+                                                                               calibration_model=None,
+                                                                               return_data=True)
+        writer.add_figure('Uncertainty reliability (unimodal)/{}'.format(tag), unimodal_fig, step_num)
+        logger.info("Generating uncertainty reliability (bimodal) plot...")
+        bimodal_fig, bimodal_calibration_data = plot_uncertainty_reliability(class_probs, posterior_params, y_true,
+                                                                             dist_shape='bimodal',
+                                                                             calibration_model=None,
+                                                                             return_data=True)
+        writer.add_figure('Uncertainty reliability (bimodal)/{}'.format(tag), bimodal_fig, step_num)
 
         # fig_acc, fig_auc, fig_f1_score = plot_confidence_level_performance(class_probs, posterior_params, y_true, calibration_model=None)
         # writer.add_figure('Acc vs. confidence level/{}'.format(tag), fig_acc, step_num)
@@ -247,13 +259,14 @@ def evaluate(model, val_loader, writer, step_num, epoch,
 
         if calibration_model is not None:
             for name in calibration_model.keys():
+                logger.info(f"Computing Wasserstein distance ({name}, calibrated)...")
                 writer.add_scalar('Wasserstein dist ({}, calibrated)/{}'.format(name, tag),
-                              compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, dist_shape=name,
+                                  compute_posterior_wasserstein_dist(class_probs, posterior_params, y_true, dist_shape=name,
                                                                  calibration_model=calibration_model[name]), step_num)
+                logger.info(f"Generating uncertainty reliability ({name}, calibrated) plot...")
                 writer.add_figure('Uncertainty reliability ({}, calibrated)/{}'.format(name, tag),
                                   plot_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=name,
-                                                               calibration_model=calibration_model[name]),
-                                  step_num)
+                                                               calibration_model=calibration_model[name]), step_num)
 
             # fig_acc, fig_auc, fig_f1_score = plot_confidence_level_performance(class_probs, posterior_params, y_true,
             #                                                                    calibration_model=calibration_model)
@@ -261,23 +274,18 @@ def evaluate(model, val_loader, writer, step_num, epoch,
             # writer.add_figure('AUC vs. confidence level (calibrated)/{}'.format(tag), fig_auc, step_num)
             # writer.add_figure('F1-score vs. confidence level (calibrated)/{}'.format(tag), fig_f1_score, step_num)
 
-
         if 'uncertainty_calibration_data' not in eval_results:
             eval_results['uncertainty_calibration_data'] = {}
 
-        exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                               dist_shape='unimodal')
-        if exp_cdf.size > 0 and obs_cdf.size > 0:
-            eval_results['uncertainty_calibration_data']['unimodal'] = (exp_cdf, obs_cdf)
+        if unimodal_calibration_data[0].size > 0:
+            eval_results['uncertainty_calibration_data']['unimodal'] = unimodal_calibration_data
         else:
-            logger.warning("No calibration data. Could be caused if there are not enough samples per bin.")
+            logger.warning("No unimodal calibration data. Could be caused if there are not enough samples per bin.")
 
-        exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true,
-                                                           dist_shape='bimodal')
-        if exp_cdf.size > 0 and obs_cdf.size > 0:
-            eval_results['uncertainty_calibration_data']['bimodal'] = (exp_cdf, obs_cdf)
+        if bimodal_calibration_data[0].size > 0:
+            eval_results['uncertainty_calibration_data']['bimodal'] = bimodal_calibration_data
         else:
-            logger.warning("No calibration data. Could be caused if there are not enough samples per bin.")
+            logger.warning("No bimodal calibration data. Could be caused if there are not enough samples per bin.")
 
     eval_results['y_pred'] = y_pred
     eval_results['class_probs'] = class_probs
@@ -507,11 +515,12 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
                                 device=device)
 
                         if 'uncertainty_calibration_data' in results[tag]:
-                            logger.info("Fitting calibration model...")
                             calibration_model = {}
                             if 'unimodal' in results[tag]['uncertainty_calibration_data']:
+                                logger.info("Fitting unimodal calibration model...")
                                 calibration_model['unimodal'] = fit_calibration_model(results[tag]['uncertainty_calibration_data']['unimodal'])
                             if 'bimodal' in results[tag]['uncertainty_calibration_data']:
+                                logger.info("Fitting bimodal calibration model...")
                                 calibration_model['bimodal'] = fit_calibration_model(
                                     results[tag]['uncertainty_calibration_data']['bimodal'])
                         else:

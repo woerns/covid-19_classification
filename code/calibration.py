@@ -1,7 +1,9 @@
 import numpy as np
 import scipy as sp
+import scipy.stats
 
 from sklearn.isotonic import IsotonicRegression
+from logger import logger
 
 
 def compute_pred_reliability(class_probs, y_true, bins=30, min_obs_per_bin=10):
@@ -62,6 +64,29 @@ def compute_expected_calibration_error(class_probs, y_true, bins=30, min_obs_per
     return ece
 
 
+def compute_empirical_cdf(observations):
+    if observations.size == 0:
+        return np.empty(0)
+
+    observations_sorted = np.copy(observations)
+    observations_sorted.sort()
+    N = len(observations)
+    empirical_cdf = np.empty((N,))
+    prev_value = observations_sorted[0]
+    write_idx = 0
+    for i in range(N):
+        if observations_sorted[i] != prev_value:
+            empirical_cdf[write_idx:i] = i
+            write_idx = i
+            prev_value = observations_sorted[i]
+
+    empirical_cdf[write_idx:] = N
+
+    empirical_cdf /= N
+
+    return empirical_cdf
+
+
 def compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=None, calibration_model=None, bins=30, min_obs_per_bin=10):
     assert len(class_probs) == len(posterior_params[0]) == len(posterior_params[1]), "class_probs and posterior_params must have same length."
     assert dist_shape in ('unimodal', 'bimodal'), "dist_shape has to be either unimodal or bimodal."
@@ -72,24 +97,29 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_
     obs_probs = np.empty((N, C))
     obs_probs[:] = np.nan
 
-    for i in range(N):
-        for j in range(C):
-            # Since the Beta distribution is generally not symmetric but is mirrored when its parameters
-            # alpha and beta are exchanged, we map all distributions to be left-tailed (where alpha > beta) before
-            # measuring and calibrating uncertainty quantiles.
-            b = np.abs(class_probs[i][j] - bin_centers).argmin()
+    bin_edges = np.concatenate(([0.0], 0.5*(bin_centers[:-1] + bin_centers[1:]), [1.0]), axis=0)
+    # Compute a NxC bin matrix containing the corresponding bin for class_probs[i][j]
+    bins = np.clip(np.searchsorted(bin_edges, class_probs, side='right'), 1, len(bin_centers)) - 1
 
-            if dist_shape == 'unimodal' and alpha[i][j] < 1 and beta[i][j] < 1:
-                # Skip if not unimodal
-                continue
-            if dist_shape == 'bimodal' and (alpha[i][j] >= 1 or beta[i][j] >= 1):
-                # Skip if not bimodal
-                continue
+    if dist_shape == 'unimodal':
+        include_idx = (alpha >= 1.) | (beta >= 1.)
+    if dist_shape == 'bimodal':
+        include_idx = (alpha < 1.) & (beta < 1.)
 
-            if alpha[i][j] < beta[i][j]:
-                obs_probs[i][j] = sp.stats.beta.cdf(1. - acc[b], beta[i][j], alpha[i][j])
-            else:
-                obs_probs[i][j] = sp.stats.beta.cdf(acc[b], alpha[i][j], beta[i][j])
+    if not include_idx.any():
+        logger.warning(f"No {dist_shape} samples.")
+
+    # Since the Beta distribution is generally not symmetric but is mirrored when its parameters
+    # alpha and beta are exchanged, we map all distributions to be left-tailed (where alpha >= beta) before
+    # measuring and calibrating uncertainty quantiles.
+    left_tailed_idx = (alpha >= beta)
+    right_tailed_idx = (~left_tailed_idx)
+    left_tailed_idx &= include_idx
+    right_tailed_idx &= include_idx
+
+    obs_probs[left_tailed_idx] = sp.stats.beta.cdf(acc[bins[left_tailed_idx]], alpha[left_tailed_idx],
+                                                   beta[left_tailed_idx])
+    obs_probs[right_tailed_idx] = sp.stats.beta.cdf(1. - acc[bins[right_tailed_idx]], beta[right_tailed_idx], alpha[right_tailed_idx])
 
     obs_probs = obs_probs.flatten()
     obs_probs = obs_probs[~np.isnan(obs_probs)]  # Remove NaNs
@@ -106,7 +136,7 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_
 
     obs_probs.sort()  # sort in ascending order
     exp_cdf = obs_probs
-    obs_cdf = np.array([(obs_probs <= x).sum() / len(obs_probs) for x in exp_cdf])
+    obs_cdf = compute_empirical_cdf(obs_probs)
 
     return exp_cdf, obs_cdf
 

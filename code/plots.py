@@ -25,7 +25,7 @@ def plot_pred_reliability(class_probs, y_true, bins=30, min_obs_per_bin=10):
     return fig
 
 
-def plot_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=None, calibration_model=None, bins=30, min_obs_per_bin=10):
+def plot_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=None, calibration_model=None, bins=30, min_obs_per_bin=10, return_data=False):
     # Note: If using a calibration model, set bins and min_obs_per_bin to the same config
     # that was used to estimate the model. Otherwise, the plot will not show actual calibration performance.
     exp_cdf, obs_cdf = compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_shape=dist_shape, calibration_model=calibration_model,
@@ -42,7 +42,10 @@ def plot_uncertainty_reliability(class_probs, posterior_params, y_true, dist_sha
     plt.ylabel('Observed cdf')
     plt.close()
 
-    return fig
+    if return_data:
+        return fig, (exp_cdf, obs_cdf)
+    else:
+        return fig
 
 
 def plot_confidence_level_performance(class_probs, posterior_params, y_true,
