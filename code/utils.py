@@ -423,27 +423,20 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             if swag and epoch >= swag_start_epoch:
                 swag_optimizer.step()
                 if i % swag_interval == 0:
-                    # DataParallel
-                    if isinstance(model, torch.nn.DataParallel):
-                        if isinstance(model.module, NetEnsemble):
-                            model.module.update_swag(k)  # Only update SWAG params for kth model
-                        elif isinstance(model.module, MultiSWAG):
-                            model.module.update_swag(k)  # Update SWAG params for kth branch
-                            model.module.update_swag()  # Update SWAG params for trunk
+
+                    if bootstrap:
+                        if isinstance(module, NetEnsemble):
+                            module.update_swag(k)  # Only update SWAG params for kth model
+                        elif isinstance(module, MultiSWAG):
+                            module.update_swag()  # Update SWAG params for trunk
+                            module.update_swag(k)  # Update SWAG params for kth branch
                     else:
-                        if bootstrap:
-                            if isinstance(model, NetEnsemble):
-                                model.update_swag(k)  # Only update SWAG params for kth model
-                            elif isinstance(model, MultiSWAG):
-                                model.update_swag()  # Update SWAG params for trunk
-                                model.update_swag(k)  # Update SWAG params for kth branch
+                        if isinstance(module, MultiSWAG):
+                            module.update_swag()  # Update SWAG params for trunk
+                            for j in range(module.n_branches):
+                                module.update_swag(j)  # Update SWAG params for all branches
                         else:
-                            if isinstance(model, MultiSWAG):
-                                model.update_swag()  # Update SWAG params for trunk
-                                for j in range(model.n_branches):
-                                    model.update_swag(j)  # Update SWAG params for all branches
-                            else:
-                                model.update_swag()  # Update SWAG params for all models
+                            module.update_swag()  # Update SWAG params for all models
             else:
                 optimizer.step()
 
@@ -466,7 +459,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             logger.info("Saving checkpoint...")
             ckpt = {
                 'epoch': epoch,
-                'model_state': module.state_dict(),
+                'model_state': model.state_dict(),
                 'optimizer_state': optimizer.state_dict(),
                 'scheduler_state': scheduler.state_dict(),
                 'random_state': {
@@ -493,15 +486,12 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             if swag and swag_branchout_layers is not None and epoch >= swag_start_epoch:
                 for layer_name in swag_branchout_layers:
                     logger.info("Sampling SWAG models branching out at %s..." % layer_name)
-                    # DataParallel
-                    if isinstance(model, torch.nn.DataParallel):
-                        model.module.sample(swag_samples, layer_name, swag_bn_data_ratio, device)
-                    else:
-                        # For SWAG model (depricated)
-                        # model.sample_masks = [create_sample_mask(model.base_model, layer_name, branch_num=i) for i in range(model.base_model.n_heads)]
-                        # model.sample(device)
-                        # For Multi-SWAG model
-                        model.sample(swag_samples, layer_name, swag_bn_data_ratio, device)
+
+                    # For SWAG model (depricated)
+                    # model.sample_masks = [create_sample_mask(model.base_model, layer_name, branch_num=i) for i in range(model.base_model.n_heads)]
+                    # model.sample(device)
+                    # For Multi-SWAG model
+                    module.sample(swag_samples, layer_name, swag_bn_data_ratio, device)
 
                     swag_writer = SummaryWriter(os.path.join(log_dir, 'branchout_{}'.format(layer_name)))
 
@@ -540,11 +530,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             else:
                 if swag and epoch >= swag_start_epoch:
                     logger.info("Sampling SWAG models...")
-                    # DataParallel
-                    if isinstance(model, torch.nn.DataParallel):
-                        model.module.sample(swag_samples, None, swag_bn_data_ratio, device)
-                    else:
-                        model.sample(swag_samples, None, swag_bn_data_ratio, device)
+                    module.sample(swag_samples, None, swag_bn_data_ratio, device)
 
                 if val_loader is not None:
                     tag = 'val'
