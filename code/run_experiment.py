@@ -46,6 +46,7 @@ def run_cv():
     parser.add_argument('--swag_interval', type=int, default=10)
     parser.add_argument('--swag_bn_data_ratio', type=float, default=1.0)
     parser.add_argument('--cv_folds', type=int, default=5)
+    parser.add_argument('--cv_fold_start', type=int, default=0)
     parser.add_argument('--bootstrap', action='store_true', default=False)
     parser.add_argument('--eval_interval', type=int, default=5)
     parser.add_argument('--ckpt_interval', type=int, default=None)

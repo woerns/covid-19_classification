@@ -354,6 +354,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             logger.info(f"Loading checkpoint {checkpoint}...")
             ckpt = torch.load(checkpoint)
             init_epoch = ckpt['epoch']
+            global_step_num = ckpt['global_step_num']
             model.load_state_dict(ckpt['model_state'])
             optimizer.load_state_dict(ckpt['optimizer_state'])
             scheduler.load_state_dict(ckpt['scheduler_state'])
@@ -367,6 +368,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             init_epoch = 0
     else:
         init_epoch = 0
+        global_step_num = 0
 
     if fold is not None:
         log_dir = os.path.join(log_dir, "fold{0:d}".format(fold))
@@ -374,8 +376,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
     writer = SummaryWriter(log_dir)
 
     iterators = [iter(x) for x in train_loader]
-
-    global_step_num = 0
 
     for epoch in range(init_epoch+1, n_epochs+1):  # loop over the datasets multiple times
         running_loss = 0.0
@@ -423,7 +423,6 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             if swag and epoch >= swag_start_epoch:
                 swag_optimizer.step()
                 if i % swag_interval == 0:
-
                     if bootstrap:
                         if isinstance(module, NetEnsemble):
                             module.update_swag(k)  # Only update SWAG params for kth model
@@ -459,6 +458,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
             logger.info("Saving checkpoint...")
             ckpt = {
                 'epoch': epoch,
+                'global_step_num': global_step_num,
                 'model_state': model.state_dict(),
                 'optimizer_state': optimizer.state_dict(),
                 'scheduler_state': scheduler.state_dict(),

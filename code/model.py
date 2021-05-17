@@ -87,6 +87,9 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     n_classes = len(set(y))
 
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
+        if fold < args.cv_fold_start:
+            continue
+
         logger.info("Running fold %d..." % fold)
 
         X_train, y_train = [X[i] for i in train_idx], [y[i] for i in train_idx]
@@ -135,7 +138,7 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
         
         # DataParallel
         if torch.cuda.device_count() > 1:
-            logger.info("Let's use", torch.cuda.device_count(), "GPUs!")
+            logger.info(f"Let's use {torch.cuda.device_count()} GPUs!")
             model = torch.nn.DataParallel(model)
 
         if args.ckpt_dir is not None:
