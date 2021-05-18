@@ -366,6 +366,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
         else:
             logger.warning("Provided checkpoint path does not exist. Starting training from scratch.")
             init_epoch = 0
+            global_step_num = 0
     else:
         init_epoch = 0
         global_step_num = 0
