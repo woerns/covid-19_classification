@@ -117,8 +117,7 @@ def compute_uncertainty_reliability(class_probs, posterior_params, y_true, dist_
     left_tailed_idx &= include_idx
     right_tailed_idx &= include_idx
 
-    obs_probs[left_tailed_idx] = sp.stats.beta.cdf(acc[bins[left_tailed_idx]], alpha[left_tailed_idx],
-                                                   beta[left_tailed_idx])
+    obs_probs[left_tailed_idx] = sp.stats.beta.cdf(acc[bins[left_tailed_idx]], alpha[left_tailed_idx], beta[left_tailed_idx])
     obs_probs[right_tailed_idx] = sp.stats.beta.cdf(1. - acc[bins[right_tailed_idx]], beta[right_tailed_idx], alpha[right_tailed_idx])
 
     obs_probs = obs_probs.flatten()

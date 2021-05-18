@@ -143,9 +143,16 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
 
         if args.ckpt_dir is not None:
             if fold is not None:
-                ckpt_file_name = f"{RUN_NAME}_fold{fold}_epoch{args.ckpt_epoch}_ckpt.pth"
+                matching_files = [x for x in os.listdir(args.ckpt_dir) if x.endswith(f'fold{fold}_epoch{args.ckpt_epoch}_ckpt.pth')]
             else:
-                ckpt_file_name = f"{RUN_NAME}_epoch{args.ckpt_epoch}_ckpt.pth"
+                matching_files = [x for x in os.listdir(args.ckpt_dir) if x.endswith(f'epoch{args.ckpt_epoch}_ckpt.pth')]
+
+            if len(matching_files) >= 1:
+                if len(matching_files) > 1:
+                    logger.warning("More than one matching checkpoint file found. Using first match.")
+                ckpt_file_name = matching_files[0]
+            else:
+                raise ValueError("No checkpoint file found.")
 
             checkpoint = os.path.join(args.ckpt_dir, ckpt_file_name)
         else:
