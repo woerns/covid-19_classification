@@ -31,6 +31,7 @@ def run_cv():
     parser.add_argument('--conf_level', type=float, default=0.0)
     parser.add_argument('--swag', action='store_true', default=False)
     parser.add_argument('--swag_branchout', action='store_true', default=False)
+    parser.add_argument('--swag_branchout_layers', nargs='+', type=str, default=None)
     parser.add_argument('--branchout_layer_name', type=str, default=None)
 
     # Training parameters
@@ -47,6 +48,7 @@ def run_cv():
     parser.add_argument('--swag_bn_data_ratio', type=float, default=1.0)
     parser.add_argument('--cv_folds', type=int, default=5)
     parser.add_argument('--cv_fold_start', type=int, default=0)
+    parser.add_argument('--cv_fold_end', type=int, default=4)
     parser.add_argument('--bootstrap', action='store_true', default=False)
     parser.add_argument('--eval_interval', type=int, default=5)
     parser.add_argument('--ckpt_interval', type=int, default=None)

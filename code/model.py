@@ -89,6 +89,8 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
     for fold, (train_idx, val_idx) in enumerate(group_kfold.split(X, y, groups)):
         if fold < args.cv_fold_start:
             continue
+        if fold > args.cv_fold_end:
+            break
 
         logger.info("Running fold %d..." % fold)
 
@@ -124,7 +126,10 @@ def crossvalidate(X, y, groups, args, X_test=None, y_test=None):
                                                        shuffle=True,
                                                        num_workers=0)
             if args.swag_branchout:
-                swag_branchout_layers = get_swag_branchout_layers(MODEL_NAME, args.branchout_layer_name)
+                if args.swag_branchout_layers is None:
+                    swag_branchout_layers = get_swag_branchout_layers(MODEL_NAME, args.branchout_layer_name)
+                else:
+                    swag_branchout_layers = args.swag_branchout_layers
             else:
                 swag_branchout_layers = None
         else:

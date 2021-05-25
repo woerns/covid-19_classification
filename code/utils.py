@@ -312,6 +312,7 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
 
     n_datasets = len(train_loader)
     steps_per_epoch = len(train_loader[0])
+    calibration_model = None
 
     if isinstance(swag_start, float) and swag_start < 1:
         swag_start_epoch = int(n_epochs*swag_start)
@@ -573,10 +574,11 @@ def train(model, train_loader, run_name, n_epochs=10, lr=0.0001, lr_hl=5,
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
 
-        logger.info("Saving calibration model...")
-        model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
-        with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
-            pickle.dump(calibration_model, file)
+        if calibration_model is not None:
+            logger.info("Saving calibration model...")
+            model_file_name = run_name + "_fold{0:d}_calibration.pkl".format(fold)
+            with open(os.path.join(model_save_dir, model_file_name), 'wb') as file:
+                pickle.dump(calibration_model, file)
 
         logger.info("Saving model...")
         if fold is not None:
